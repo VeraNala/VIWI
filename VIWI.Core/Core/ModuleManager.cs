@@ -15,12 +15,12 @@ namespace VIWI.Core
         {
             if (initialized)
             {
-                PluginLog.Warning("[VIWI] ModuleManager.Initialize called more than once; ignoring.");
+                PluginLog.Warning("ModuleManager.Initialize called more than once; ignoring.");
                 return;
             }
 
             initialized = true;
-            PluginLog.Information("[VIWI] Loading VIWI modules...");
+            PluginLog.Information("Loading VIWI modules...");
 
             try
             {
@@ -31,10 +31,10 @@ namespace VIWI.Core
             }
             catch (Exception ex)
             {
-                PluginLog.Error($"[VIWI] Unexpected error during module scan: {ex}");
+                PluginLog.Error($"Unexpected error during module scan: {ex}");
             }
 
-            PluginLog.Information($"[VIWI] Loaded {modules.Count} module(s).");
+            PluginLog.Information($"Loaded {modules.Count} module(s).");
         }
         public static void Dispose()
         {
@@ -47,11 +47,11 @@ namespace VIWI.Core
                 try
                 {
                     module.Dispose();
-                    PluginLog.Information($"[VIWI] Unloaded module: {module.Name}");
+                    PluginLog.Information($"Unloaded module: {module.Name}");
                 }
                 catch (Exception ex)
                 {
-                    PluginLog.Error($"[VIWI] Error unloading module {module.Name}: {ex}");
+                    PluginLog.Error($"Error unloading module {module.Name}: {ex}");
                 }
             }
 
@@ -89,11 +89,11 @@ namespace VIWI.Core
                         continue;
                     modules.Add(module);
                     module.Initialize();
-                    PluginLog.Information($"[VIWI] Loaded module: {module.Name} v{module.Version}");
+                    PluginLog.Information($"Loaded module: {module.Name} v{module.Version}");
                 }
                 catch (Exception ex)
                 {
-                    PluginLog.Error($"[VIWI] Error loading module {type.FullName}: {ex}");
+                    PluginLog.Error($"Error loading module {type.FullName}: {ex}");
                 }
             }
         }

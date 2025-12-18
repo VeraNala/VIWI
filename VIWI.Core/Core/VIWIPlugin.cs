@@ -1,4 +1,3 @@
-using Dalamud.Game;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
@@ -15,7 +14,9 @@ public sealed class VIWIPlugin : IDalamudPlugin
     public const bool DEVMODE = false;
     public static VIWIPlugin Instance { get; private set; } = null!;
 
-    public IDalamudPluginInterface PluginInterface { get; }
+    //public IDalamudPluginInterface PluginInterface { get; }
+    [PluginService] internal static IPluginLog PluginLog { get; private set; } = null!;
+    [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static IClientState ClientState { get; private set; } = null!;
     [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
@@ -35,6 +36,7 @@ public sealed class VIWIPlugin : IDalamudPlugin
 
     public VIWIPlugin(
             IDalamudPluginInterface pluginInterface,
+            IPluginLog pluginLog,
             IClientState clientState,
             IPlayerState playerState,
             IObjectTable objectTable,
@@ -54,6 +56,7 @@ public sealed class VIWIPlugin : IDalamudPlugin
 
         VIWIContext.CorePlugin = this;
         VIWIContext.PluginInterface = pluginInterface;
+        VIWIContext.PluginLog = pluginLog;
         VIWIContext.ClientState = clientState;
         VIWIContext.PlayerState = playerState;
         VIWIContext.ObjectTable = objectTable;
@@ -69,7 +72,7 @@ public sealed class VIWIPlugin : IDalamudPlugin
         VIWIContext.Condition = condition;
 
         ECommonsMain.Init(pluginInterface, this);
-        PluginLog.Information("[VIWI] Core + ECommons initialized.");
+        PluginLog.Information("Core + ECommons initialized.");
 
         MainWindow = new MainDashboardWindow();
         WindowSystem.AddWindow(MainWindow);
@@ -98,7 +101,7 @@ public sealed class VIWIPlugin : IDalamudPlugin
 
         ModuleManager.Dispose();
         ECommonsMain.Dispose();
-        PluginLog.Information("[VIWI] Core + ECommons unloaded.");
+        PluginLog.Information("Core + ECommons unloaded.");
     }
 
     private void ToggleMainUI() => MainWindow?.Toggle();

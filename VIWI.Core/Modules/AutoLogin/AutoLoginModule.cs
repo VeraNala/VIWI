@@ -21,7 +21,7 @@ namespace VIWI.Modules.AutoLogin
     internal unsafe class AutoLoginModule : IVIWIModule
     {
         public const string ModuleName = "AutoLogin";
-        public const string ModuleVersion = "1.0.1";
+        public const string ModuleVersion = "1.0.2";
 
         public string Name => ModuleName;
         public string Version => ModuleVersion;
@@ -49,6 +49,9 @@ namespace VIWI.Modules.AutoLogin
         public delegate char LobbyErrorHandlerDelegate(Int64 a1, Int64 a2, Int64 a3);
         private Hook<LobbyErrorHandlerDelegate>? LobbyErrorHandlerHook;
         private bool noKillHookInitialized;
+
+        private DateTime _lastErrorEpisode = DateTime.MinValue;
+        private bool _inErrorRecovery = false;
 
         // ----------------------------
         // Construction / init
@@ -144,13 +147,26 @@ namespace VIWI.Modules.AutoLogin
         private void OnLogout(int type, int code)
         {
             if (!Config.Enabled) return;
-            if ((code == 90001 || code == 90002) || code == 90006 || code == 90007) { // Hopefully this handles all common cases
+
+            if ((code == 90001 || code == 90002) || code == 90006 || code == 90007)
+            {
                 PluginLog.Information($"[AutoLogin] Disconnection Detected! Type {type}, Error Code {code}");
-                TaskManager.Enqueue(() => Error90000(), "Error90000");
-                TaskManager.Enqueue(() => Error90000(), "Error90000");
-                PluginLog.Information("[AutoLogin] Recovery Complete!");
-                PluginLog.Information("[AutoLogin] Starting Relog Process");
-                StartAutoLogin();
+
+                if (_inErrorRecovery) return;
+
+                _inErrorRecovery = true;
+                _lastErrorEpisode = DateTime.UtcNow;
+
+                TaskManager.Abort();
+                TaskManager.Enqueue(ClearDisconnectErrors, "ClearDisconnectErrors");
+                TaskManager.Enqueue(ClearDisconnectErrors, "ClearDisconnectErrors"); //For some ungodly reason there is two windows here so we have to call this twice *only* on logouts???
+                TaskManager.Enqueue(() =>
+                {
+                    if (IsLobbyError2002Screen()) return false;
+                    StartAutoLogin();
+                    _inErrorRecovery = false;
+                    return true;
+                }, "StartAutoLogin");
             }
         }
         public void NoKill()
@@ -255,6 +271,35 @@ namespace VIWI.Modules.AutoLogin
         private void OnFrameworkUpdate(IFramework _)
         {
             if (!Config.Enabled) return;
+
+            var errorVisible = IsLobbyError2002Screen();
+
+            if (errorVisible && !_inErrorRecovery)
+            {
+                _inErrorRecovery = true;
+                _lastErrorEpisode = DateTime.UtcNow;
+
+                PluginLog.Warning("[AutoLogin] Lobby error detected (likely 2002). Switching to error clear + resume.");
+
+                TaskManager.Abort();
+                TaskManager.Enqueue(ClearDisconnectErrors, "ClearDisconnectErrors");
+                TaskManager.Enqueue(() =>
+                {
+                    if (IsLobbyError2002Screen()) return false;
+                    StartAutoLogin();
+                    _inErrorRecovery = false;
+                    return true;
+                }, "ResumeAutoLogin");
+
+                return;
+            }
+
+            if (!errorVisible && _inErrorRecovery)
+            {
+                if ((DateTime.UtcNow - _lastErrorEpisode).TotalMilliseconds > 1000)
+                    _inErrorRecovery = false;
+            }
+
             if (TaskManager.IsBusy) return;
         }
 
@@ -277,25 +322,35 @@ namespace VIWI.Modules.AutoLogin
             TaskManager.Enqueue(() => SelectCharacter(chara, hWorld, cWorld, dc), "SelectCharacter");
             TaskManager.Enqueue(() => ConfirmLogin(), "ConfirmLogin");
         }
-        private bool Error90000()
+        private bool HasLobbyErrorDialogue()
         {
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "Dialogue", out var addon) && GenericHelpers.IsAddonReady(addon))
-            {
-                if (EzThrottler.Throttle("ClickDialogueOk1", 10000))
-                {
-                    addon->GetComponentButtonById(4)->ClickAddonButton(addon);
-                    PluginLog.Information("[AutoLogin] Clicking Button!!");
-                        return true;
-                }
-            }
-            if (!GenericHelpers.IsAddonReady(addon))
-            {
-                PluginLog.Information("[AutoLogin] RecoveryWindow Not Ready");
-            }
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "Dialogue", out var d) && d->IsVisible) return true;
+
             return false;
+        }
+        private bool ClearDisconnectErrors()
+        {
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "Dialogue", out var dialogue) && GenericHelpers.IsAddonReady(dialogue) && dialogue->IsVisible)
+            {
+                if (EzThrottler.Throttle("AutoLogin.Clear.DialogueOk", 800))
+                {
+                    var btn = dialogue->GetComponentButtonById(4);
+                    if (btn != null)
+                    {
+                        btn->ClickAddonButton(dialogue);
+                        PluginLog.Information("[AutoLogin] Clicking Dialogue OK");
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            return !HasLobbyErrorDialogue();
         }
         private bool SelectDataCenterMenu()  // Title Screen -> Selecting Data Center Menu
         {
+            if (GuardAgainstErrors()) return false;
             if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "TitleDCWorldMap", out var dcMenu) && dcMenu->IsVisible)
             {
                 PluginLog.Information("[AutoLogin] DC Selection Menu Visible");
@@ -319,6 +374,7 @@ namespace VIWI.Modules.AutoLogin
 
         private bool SelectDataCenter(int dc, string currWorld)
         {
+            if (GuardAgainstErrors()) return false;
             if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "_CharaSelectListMenu", out var charaMenu) && charaMenu->IsVisible)
             {
                 PluginLog.Information("[AutoLogin] Character Selection Menu Visible");
@@ -436,6 +492,31 @@ namespace VIWI.Modules.AutoLogin
                     }
                 }
                 return false;
+            }
+
+            return false;
+        }
+        private bool GuardAgainstErrors()
+        {
+            if (IsLobbyError2002Screen())
+            {
+                PluginLog.Warning("[AutoLogin] Error dialog detected mid-login; returning to error clearing.");
+                return true;
+            }
+            return false;
+        }
+        private unsafe bool IsLobbyError2002Screen()
+        {
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "Dialogue", out var dialogue) &&
+                GenericHelpers.IsAddonReady(dialogue) && dialogue->IsVisible)
+            {
+                return true;
+            }
+            foreach (var name in new[] { "_TitleError", "TitleError", "TitleServerError", "TitleNetworkError" })
+            {
+                if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, name, out var a) &&
+                    GenericHelpers.IsAddonReady(a) && a->IsVisible)
+                    return true;
             }
 
             return false;

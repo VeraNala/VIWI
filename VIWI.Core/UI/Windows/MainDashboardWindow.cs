@@ -13,7 +13,7 @@ namespace VIWI.UI.Windows
         private IDashboardPage? activePage;
 
         public MainDashboardWindow()
-            : base("Vera's Integrated World Improvements##VIWI Dashboard",
+            : base("VIWI - Vera's Integrated World Improvements##VIWI Dashboard",
                   ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
         {
             SizeConstraints = new WindowSizeConstraints

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
@@ -14,10 +15,10 @@ internal sealed class ExternalPluginHandler
 
     public ExternalPluginHandler(IDalamudPluginInterface pluginInterface, IPluginLog pluginLog)
     {
-        _pluginInterface = pluginInterface;
-        _pluginLog = pluginLog;
+        _pluginInterface = pluginInterface ?? throw new ArgumentNullException(nameof(pluginInterface));
+        _pluginLog = pluginLog ?? throw new ArgumentNullException(nameof(pluginLog));
 
-        _pandoraIpc = new PandoraIpc(pluginInterface, pluginLog);
+        _pandoraIpc = new PandoraIpc(_pluginInterface, _pluginLog);
     }
 
     public bool Saved { get; private set; }
@@ -26,30 +27,44 @@ internal sealed class ExternalPluginHandler
     {
         if (Saved)
         {
-            _pluginLog.Information("Not overwriting external plugin state");
+            _pluginLog.Information("[Workshoppa] Not overwriting external plugin state");
             return;
         }
 
-        _pluginLog.Information("Saving external plugin state...");
-        SaveYesAlreadyState();
-        SavePandoraState();
+        try
+        {
+            _pluginLog.Information("[Workshoppa] Saving external plugin state...");
+        }
+        catch
+        {
+            // In the extremely unlikely case logging itself throws, don't crash.
+        }
+
+        Safe("YesAlready", SaveYesAlreadyState);
+        Safe("Pandora", SavePandoraState);
+
         Saved = true;
     }
 
     private void SaveYesAlreadyState()
     {
-        if (_pluginInterface.TryGetData<HashSet<string>>("YesAlready.StopRequests", out var data) &&
-            !data.Contains(nameof(Workshoppa)))
+        if (!_pluginInterface.TryGetData<HashSet<string>>("YesAlready.StopRequests", out var data) || data == null)
+            return;
+
+        // Use your module name key consistently; avoid nameof(Workshoppa) if that isn't a type in this assembly.
+        const string key = "Workshoppa";
+
+        if (!data.Contains(key))
         {
-            _pluginLog.Debug("Disabling YesAlready");
-            data.Add(nameof(Workshoppa));
+            _pluginLog.Debug("[Workshoppa] Disabling YesAlready");
+            data.Add(key);
         }
     }
 
     private void SavePandoraState()
     {
         _pandoraState = _pandoraIpc.DisableIfNecessary();
-        _pluginLog.Information($"Previous pandora feature state: {_pandoraState}");
+        _pluginLog.Information($"[Workshoppa] Previous Pandora feature state: {_pandoraState}");
     }
 
     /// <summary>
@@ -58,20 +73,26 @@ internal sealed class ExternalPluginHandler
     /// </summary>
     public void SaveTextAdvance()
     {
-        if (_pluginInterface.TryGetData<HashSet<string>>("TextAdvance.StopRequests", out var data) &&
-            !data.Contains(nameof(Workshoppa)))
+        Safe("TextAdvance", () =>
         {
-            _pluginLog.Debug("Disabling textadvance");
-            data.Add(nameof(Workshoppa));
-        }
-    }
+            if (!_pluginInterface.TryGetData<HashSet<string>>("TextAdvance.StopRequests", out var data) || data == null)
+                return;
 
+            const string key = "Workshoppa";
+
+            if (!data.Contains(key))
+            {
+                _pluginLog.Debug("[Workshoppa] Disabling TextAdvance");
+                data.Add(key);
+            }
+        });
+    }
     public void Restore()
     {
         if (Saved)
         {
-            RestoreYesAlready();
-            RestorePandora();
+            Safe("YesAlready", RestoreYesAlready);
+            Safe("Pandora", RestorePandora);
         }
 
         Saved = false;
@@ -80,28 +101,51 @@ internal sealed class ExternalPluginHandler
 
     private void RestoreYesAlready()
     {
-        if (_pluginInterface.TryGetData<HashSet<string>>("YesAlready.StopRequests", out var data) &&
-            data.Contains(nameof(Workshoppa)))
+        if (!_pluginInterface.TryGetData<HashSet<string>>("YesAlready.StopRequests", out var data) || data == null)
+            return;
+
+        const string key = "Workshoppa";
+
+        if (data.Contains(key))
         {
-            _pluginLog.Debug("Restoring YesAlready");
-            data.Remove(nameof(Workshoppa));
+            _pluginLog.Debug("[Workshoppa] Restoring YesAlready");
+            data.Remove(key);
         }
     }
 
     private void RestorePandora()
     {
-        _pluginLog.Information($"Restoring previous pandora state: {_pandoraState}");
+        _pluginLog.Information($"[Workshoppa] Restoring previous Pandora state: {_pandoraState}");
         if (_pandoraState == true)
             _pandoraIpc.Enable();
     }
 
     public void RestoreTextAdvance()
     {
-        if (_pluginInterface.TryGetData<HashSet<string>>("TextAdvance.StopRequests", out var data) &&
-            data.Contains(nameof(Workshoppa)))
+        Safe("TextAdvance", () =>
         {
-            _pluginLog.Debug("Restoring textadvance");
-            data.Remove(nameof(Workshoppa));
+            if (!_pluginInterface.TryGetData<HashSet<string>>("TextAdvance.StopRequests", out var data) || data == null)
+                return;
+
+            const string key = "Workshoppa";
+
+            if (data.Contains(key))
+            {
+                _pluginLog.Debug("[Workshoppa] Restoring TextAdvance");
+                data.Remove(key);
+            }
+        });
+    }
+
+    private void Safe(string name, Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            _pluginLog.Warning(ex, $"[Workshoppa] External integration '{name}' failed; ignoring.");
         }
     }
 }

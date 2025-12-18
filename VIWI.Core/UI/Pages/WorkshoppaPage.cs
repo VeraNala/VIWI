@@ -75,8 +75,8 @@ namespace VIWI.UI.Pages
             if (ImGui.Button("Open Workshoppa"))
                 WorkshoppaModule.Instance?.OpenWorkshoppa();
 
+            /* -- TODO: Automate travel to these vendors??
             ImGui.SameLine();
-
             if (ImGui.Button("Open Repair Kit"))
                 WorkshoppaModule.Instance?.OpenRepairKit();
 
@@ -84,6 +84,7 @@ namespace VIWI.UI.Pages
 
             if (ImGui.Button("Open Ceruleum Tanks"))
                 WorkshoppaModule.Instance?.OpenTanks();
+            */
         }
     }
 }

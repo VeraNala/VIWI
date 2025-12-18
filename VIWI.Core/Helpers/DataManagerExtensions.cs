@@ -142,6 +142,8 @@ public interface IQuestDialogueText
 public readonly struct QuestDialogueText(ExcelPage page, uint offset, uint row) : IQuestDialogueText, IExcelRow<QuestDialogueText>
 {
     public uint RowId => row;
+    public ExcelPage ExcelPage => page;
+    public uint RowOffset => offset;
 
     public ReadOnlySeString Key => page.ReadString(offset, offset);
     public ReadOnlySeString Value => page.ReadString(offset + 4, offset);

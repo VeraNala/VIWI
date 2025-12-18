@@ -6,7 +6,6 @@ using Dalamud.Interface.Components;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using System;
-using System.Linq;
 using VIWI.Modules.Workshoppa.External;
 using VIWI.Modules.Workshoppa.Windows.Shop;
 using VIWI.Helpers;
@@ -48,45 +47,44 @@ internal sealed unsafe class WorkshoppaRepairKitWindow : WorkshoppaShopWindowBas
 
     public override void UpdateShopStock(AtkUnitBase* addon)
     {
+        Shop.ItemForSale = null;
+
         if (GetDarkMatterClusterCount() == 0)
-        {
-            Shop.ItemForSale = null;
             return;
-        }
 
         if (addon->AtkValuesCount != 625)
         {
             _log.Error($"Unexpected amount of atkvalues for Shop addon ({addon->AtkValuesCount})");
-            Shop.ItemForSale = null;
             return;
         }
 
         var atkValues = addon->AtkValues;
 
+        // Check if on 'Current Stock' tab?
         if (atkValues[0].UInt != 0)
-        {
-            Shop.ItemForSale = null;
             return;
-        }
 
         uint itemCount = atkValues[2].UInt;
         if (itemCount == 0)
-        {
-            Shop.ItemForSale = null;
             return;
-        }
 
-        // Build the list and pick Grade 6 Dark Matter
-        Shop.ItemForSale = Enumerable.Range(0, (int)itemCount)
-            .Select(i => new ShopItemForSale
+        for (int i = 0; i < itemCount; i++)
+        {
+            uint itemId = atkValues[441 + i].UInt;
+            if (itemId != Grade6DarkMatterItemId)
+                continue;
+
+            Shop.ItemForSale = new ShopItemForSale
             {
                 Position = i,
                 ItemName = atkValues[14 + i].ReadAtkString(),
                 Price = atkValues[75 + i].UInt,
                 OwnedItems = atkValues[136 + i].UInt,
-                ItemId = atkValues[441 + i].UInt,
-            })
-            .FirstOrDefault(x => x.ItemId == Grade6DarkMatterItemId);
+                ItemId = itemId,
+            };
+
+            return;
+        }
     }
 
     protected override void DrawContent()
@@ -145,6 +143,7 @@ internal sealed unsafe class WorkshoppaRepairKitWindow : WorkshoppaShopWindowBas
                 }
             }
         }
+        //DrawFollowControls();
     }
 
     public override void TriggerPurchase(AtkUnitBase* addonShop, int buyNow)

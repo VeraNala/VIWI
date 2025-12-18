@@ -93,10 +93,10 @@ internal sealed unsafe class RegularShopController : IDisposable
             addon->GetSize(&width, &height, true);
             x += width;
 
-            // position our window to the right of the shop addon
-            var desired = new Vector2(x, y);
-            if (_parent.Position is { } pos && ((short)pos.X != x || (short)pos.Y != y))
-                _parent.Position = desired;
+            if (_parent.FollowAddon)
+            {
+                _parent.SnapToAddonClamped(x, y, width, height, Vector2.Zero);
+            }
 
             _parent.IsOpen = true;
         }

@@ -3,10 +3,10 @@
   "Author": "VeraNala",
   "Punchline": "VIWI",
   "InternalName": "VIWI",
-  "DalamudApiLevel": "13"
-  "MinimumDalamudVersion": "13.0.0.0",
+  "DalamudApiLevel": "14",
+  "MinimumDalamudVersion": "14.0.0.0",
   "Description": "A collection of plugins-turned-modules and various QoL improvements and Automation features.",
-  "Tags":  "VIWI, Vera, Workshoppa, Deliveroo, AutoLogin, Login, AoE, AoEasy, Squadronista",
+  "Tags": [ "VIWI", "Vera", "Workshoppa", "Deliveroo", "AutoLogin", "Login", "AoE", "AoEasy", "Squadronista" ],
   "RepoUrl": "https://github.com/VeraNala/VIWI",
   "IconUrl": "https://github.com/VeraNala/VIWI/VIWI.png"
 }

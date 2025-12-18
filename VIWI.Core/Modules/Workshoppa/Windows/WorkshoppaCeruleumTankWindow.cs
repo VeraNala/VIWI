@@ -148,6 +148,7 @@ internal sealed unsafe class WorkshoppaCeruleumTankWindow : WorkshoppaShopWindow
                 }
             }
         }
+        //DrawFollowControls();
     }
 
     private static string FormatStackCount(int ceruleumTanks)
