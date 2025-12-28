@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using ECommons.Logging;
-using VIWI.Core.Config;
 
 namespace VIWI.Core
 {
@@ -97,9 +96,11 @@ namespace VIWI.Core
 
             foreach (var type in moduleTypes)
             {
+                IVIWIModule? module = null;
+
                 try
                 {
-                    var module = CreateModuleInstance(type, config);
+                    module = CreateModuleInstance(type, config);
                     if (module == null)
                         continue;
 
@@ -111,6 +112,16 @@ namespace VIWI.Core
                 catch (Exception ex)
                 {
                     PluginLog.Error($"Error loading module {type.FullName}: {ex}");
+
+                    if (module != null)
+                    {
+                        try 
+                        { 
+                            module.Dispose(); 
+                        } 
+                        catch { }
+                        modules.Remove(module);
+                    }
                 }
             }
         }
@@ -128,10 +139,5 @@ namespace VIWI.Core
         }
     }
 
-    public interface IVIWIModule : IDisposable
-    {
-        string Name { get; }
-        string Version { get; }
-        void Initialize(VIWIConfig config);
-    }
+
 }

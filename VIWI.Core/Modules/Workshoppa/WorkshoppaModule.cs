@@ -2,59 +2,41 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Command;
-using Dalamud.IoC;
-using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
-using ECommons.Configuration;
-using ECommons.Logging;
-using ECommons.SimpleGui;
 using ECommons.Throttlers;
-using FFXIVClientStructs.FFXIV.Client.Game.Fate;
-using FFXIVClientStructs.FFXIV.Common.Lua;
 using System;
 using System.Collections.Generic;
-using System.Configuration;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
-using System.Linq.Expressions;
+using System.Xml.Linq;
 using VIWI.Core;
-using VIWI.Core.Config;
-using VIWI.Modules.AutoLogin;
 using VIWI.Modules.Workshoppa.External;
 using VIWI.Modules.Workshoppa.GameData;
 using VIWI.Modules.Workshoppa.Windows;
+using static FFXIVClientStructs.FFXIV.Component.GUI.AtkComponentList;
+using static VIWI.Core.VIWIContext;
+using static VIWI.Modules.Workshoppa.WorkshoppaConfig;
 
 namespace VIWI.Modules.Workshoppa;
 
 [SuppressMessage("ReSharper", "ClassNeverInstantiated.Global")]
-internal sealed partial class WorkshoppaModule : IVIWIModule
+internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig>
 {
     public const string ModuleName = "Workshoppa";
-    public const string ModuleVersion = "1.0.0";
-
-    public string Name => ModuleName;
-    public string Version => ModuleVersion;
-
+    public const string ModuleVersion = "1.0.1";
+    public override string Name => ModuleName;
+    public override string Version => ModuleVersion;
+    public WorkshoppaConfig _configuration => ModuleConfig;
+    private VIWIConfig Core => CoreConfig;
     internal static WorkshoppaModule? Instance { get; private set; }
+    public static bool Enabled => Instance?._configuration?.Enabled ?? false;
 
-    // ---- Config ----
-    private VIWIConfig vConfig = null!;
-    public static WorkshoppaConfig _configuration = null!;
-    public static bool Enabled => _configuration?.Enabled ?? false;
-
-    // ---- Services ----
-    private readonly IDalamudPluginInterface _pluginInterface;
-    private readonly IGameGui _gameGui;
-    private readonly IFramework _framework;
-    private readonly ICondition _condition;
-    private readonly IClientState _clientState;
-    private readonly IObjectTable _objectTable;
-    private readonly IDataManager dataManager;
-    private readonly ICommandManager _commandManager;
-    private readonly IAddonLifecycle addonLifecycle;
-    private readonly IChatGui _chatGui;
-    private readonly ITextureProvider textureProvider;
-    private readonly IPluginLog _pluginLog;
+    protected override WorkshoppaConfig CreateConfig() => new WorkshoppaConfig();
+    protected override WorkshoppaConfig GetConfigBranch(VIWIConfig core) => core.Workshoppa;
+    protected override void SetConfigBranch(VIWIConfig core, WorkshoppaConfig _configuration) => core.Workshoppa = _configuration;
+    protected override bool GetEnabled(WorkshoppaConfig _configuration) => _configuration.Enabled;
+    protected override void SetEnabledValue(WorkshoppaConfig _configuration, bool enabled) => _configuration.Enabled = enabled;
+    public void SaveConfig() => Core.Save();
 
     // ---- State / systems ----
     private readonly IReadOnlyList<uint> _fabricationStationIds =
@@ -70,62 +52,94 @@ internal sealed partial class WorkshoppaModule : IVIWIModule
     private WorkshoppaWindow _mainWindow = null!;
     private WorkshoppaRepairKitWindow _repairKitWindow = null!;
     private WorkshoppaCeruleumTankWindow _ceruleumTankWindow = null!;
+    private WorkshoppaMudstoneWindow _mudstoneWindow = null!;
 
     private Stage _currentStageInternal = Stage.Stopped;
     private DateTime _continueAt = DateTime.MinValue;
     private DateTime _fallbackAt = DateTime.MaxValue;
 
-    private bool initialized;
-    private long _lastUpdateTick;
-    private int _updateReentryCount;
-    private bool _hooksActive;
-
-    public WorkshoppaModule()
+    public override void Initialize(VIWIConfig config)
     {
-        _pluginInterface = VIWIContext.PluginInterface;
-        _gameGui = VIWIContext.GameGui;
-        _framework = VIWIContext.Framework;
-        _condition = VIWIContext.Condition;
-        _clientState = VIWIContext.ClientState;
-        _objectTable = VIWIContext.ObjectTable;
-        dataManager = VIWIContext.DataManager;
-        _commandManager = VIWIContext.CommandManager;
-        addonLifecycle = VIWIContext.AddonLifecycle;
-        _chatGui = VIWIContext.ChatGui;
-        textureProvider = VIWIContext.TextureProvider;
-        _pluginLog = VIWIContext.PluginLog;
-    }
-
-    public void Initialize(VIWIConfig config)
-    {
-        if (initialized) return;
-        initialized = true;
-
         Instance = this;
-        LoadConfig();
-        _externalPluginHandler = new ExternalPluginHandler(_pluginInterface, _pluginLog);
+        base.Initialize(config);
+        _externalPluginHandler = new ExternalPluginHandler(PluginInterface, PluginLog);
         //_configuration = (WorkshoppaConfig?)_pluginInterface.GetPluginConfig() ?? new WorkshoppaConfig();
-        _workshopCache = new WorkshopCache(dataManager, _pluginLog);
-        _gameStrings = new(dataManager, _pluginLog);
+        _workshopCache = new WorkshopCache(DataManager, PluginLog);
+        _gameStrings = new(DataManager, PluginLog);
 
-        _mainWindow = new WorkshoppaWindow(this, _clientState, _configuration, _workshopCache, new IconCache(textureProvider), _chatGui, new RecipeTree(dataManager, _pluginLog), _pluginLog);
-        VIWIContext.CorePlugin.WindowSystem.AddWindow(_mainWindow);
-        _repairKitWindow = new(_pluginLog, _gameGui, addonLifecycle, _configuration, _externalPluginHandler);
-        VIWIContext.CorePlugin.WindowSystem.AddWindow(_repairKitWindow);
-        _ceruleumTankWindow = new(_pluginLog, _gameGui, addonLifecycle, _configuration, _externalPluginHandler, _chatGui);
-        VIWIContext.CorePlugin.WindowSystem.AddWindow(_ceruleumTankWindow);
+        _mainWindow = new WorkshoppaWindow(this, ClientState, _configuration, _workshopCache, new IconCache(TextureProvider), ChatGui, new RecipeTree(DataManager, PluginLog), PluginLog);
+        CorePlugin.WindowSystem.AddWindow(_mainWindow);
+        _repairKitWindow = new(PluginLog, GameGui, AddonLifecycle, _configuration, _externalPluginHandler);
+        CorePlugin.WindowSystem.AddWindow(_repairKitWindow);
+        _ceruleumTankWindow = new(PluginLog, GameGui, AddonLifecycle, _configuration, _externalPluginHandler, ChatGui);
+        CorePlugin.WindowSystem.AddWindow(_ceruleumTankWindow);
+        _mudstoneWindow = new(PluginLog, GameGui, AddonLifecycle, _configuration, _externalPluginHandler, ChatGui);
+        CorePlugin.WindowSystem.AddWindow(_mudstoneWindow);
 
-        /*if (_configuration.Enabled)
-            Enable();*/
-        PluginLog.Information("[Workshoppa] Module initialized.");
+        if (_configuration.Enabled) 
+            Enable();
+    }
+    public override void Enable()
+    {
+        Framework.Update += OnFrameworkUpdate;
+
+        CommandManager.AddHandler("/ws", new CommandInfo(ProcessCommand) { ShowInHelp = false });
+        CommandManager.AddHandler("/workshoppa", new CommandInfo(ProcessCommand) { HelpMessage = "Open Workshoppa UI" });
+        CommandManager.AddHandler("/buy-tanks", new CommandInfo(ProcessFuelBuyCommand) { ShowInHelp = false });
+        CommandManager.AddHandler("/fill-tanks", new CommandInfo(ProcessFuelFillCommand) { ShowInHelp = false });
+        CommandManager.AddHandler("/buy-stone", new CommandInfo(ProcessStoneBuyCommand) { ShowInHelp = false });
+        CommandManager.AddHandler("/fill-stone", new CommandInfo(ProcessStoneFillCommand) { ShowInHelp = false });
+        CommandManager.AddHandler("/grindstone", new CommandInfo(ProcessLevelingCommand) { ShowInHelp = false });
+        CommandManager.AddHandler("/g6dm", new CommandInfo(ProcessDarkMatterCommand) { ShowInHelp = false });
+
+        _repairKitWindow?.EnableShopListeners();
+        _ceruleumTankWindow?.EnableShopListeners();
+        _mudstoneWindow?.EnableShopListeners();
+        AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "SelectYesno", SelectYesNoPostSetup);
+        AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "Request", RequestPostSetup);
+        AddonLifecycle.RegisterListener(AddonEvent.PostRefresh, "Request", RequestPostRefresh);
+        AddonLifecycle.RegisterListener(AddonEvent.PostUpdate, "ContextIconMenu", ContextIconMenuPostReceiveEvent);
     }
 
-    public void Dispose()
+    public override void Disable()
+    {
+        _repairKitWindow?.DisableShopListeners();
+        _ceruleumTankWindow?.DisableShopListeners();
+        AddonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "ContextIconMenu", ContextIconMenuPostReceiveEvent);
+        AddonLifecycle.UnregisterListener(AddonEvent.PostRefresh, "Request", RequestPostRefresh);
+        AddonLifecycle.UnregisterListener(AddonEvent.PostSetup, "Request", RequestPostSetup);
+        AddonLifecycle.UnregisterListener(AddonEvent.PostSetup, "SelectYesno", SelectYesNoPostSetup);
+
+        CommandManager.RemoveHandler("/g6dm");
+        CommandManager.RemoveHandler("/grindstone");
+        CommandManager.RemoveHandler("/fill-stone");
+        CommandManager.RemoveHandler("/buy-stone");
+        CommandManager.RemoveHandler("/fill-tanks");
+        CommandManager.RemoveHandler("/buy-tanks");
+        CommandManager.RemoveHandler("/workshoppa");
+        CommandManager.RemoveHandler("/ws");
+
+        Framework.Update -= OnFrameworkUpdate;
+
+        if (CurrentStage != Stage.Stopped)
+        {
+            _externalPluginHandler.Restore();
+            CurrentStage = Stage.Stopped;
+        }
+
+        if (_mainWindow != null && _mainWindow.IsOpen) _mainWindow.IsOpen = false;
+        if (_repairKitWindow != null) _repairKitWindow.IsOpen = false;
+        if (_ceruleumTankWindow != null) _ceruleumTankWindow.IsOpen = false;
+        if (_mudstoneWindow != null) _mudstoneWindow.IsOpen = false;
+    }
+
+    public override void Dispose()
     {
         try
         {
             if (_ceruleumTankWindow != null) _ceruleumTankWindow.Dispose();
             if (_repairKitWindow != null) _repairKitWindow.Dispose();
+            if (_mudstoneWindow != null) _mudstoneWindow.Dispose();
 
             _externalPluginHandler?.RestoreTextAdvance();
             _externalPluginHandler?.Restore();
@@ -141,94 +155,10 @@ internal sealed partial class WorkshoppaModule : IVIWIModule
         }
     }
 
-    public static void SetEnabled(bool value)
-    {
-        if (_configuration == null) return;
-
-        _configuration.Enabled = value;
-        SaveConfig();
-
-        if (value)
-            Instance?.Enable();
-        else
-            Instance?.Disable();
-    }
-
-    private void Enable()
-    {
-        if (_hooksActive)
-        {
-            _pluginLog.Warning("Enable() ignored: hooks already active.");
-            return;
-        }
-
-        _hooksActive = true;
-        SaveConfig();
-
-        _framework.Update += OnFrameworkUpdate;
-
-        _commandManager.AddHandler("/ws", new CommandInfo(ProcessCommand) { HelpMessage = "Open Workshoppa UI" });
-        _commandManager.AddHandler("/workshoppa", new CommandInfo(ProcessCommand) { ShowInHelp = false });
-        _commandManager.AddHandler("/buy-tanks", new CommandInfo(ProcessBuyCommand) { HelpMessage = "Buy a given number of ceruleum tank stacks." });
-        _commandManager.AddHandler("/fill-tanks", new CommandInfo(ProcessFillCommand) { HelpMessage = "Fill your inventory with a given number of ceruleum tank stacks." });
-
-        _repairKitWindow?.EnableShopListeners();
-        _ceruleumTankWindow?.EnableShopListeners();
-        addonLifecycle.RegisterListener(AddonEvent.PostSetup, "SelectYesno", SelectYesNoPostSetup);
-        addonLifecycle.RegisterListener(AddonEvent.PostSetup, "Request", RequestPostSetup);
-        addonLifecycle.RegisterListener(AddonEvent.PostRefresh, "Request", RequestPostRefresh);
-        addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "ContextIconMenu", ContextIconMenuPostReceiveEvent);
-    }
-
-    private void Disable()
-    {
-        if (!_hooksActive)
-        {
-            _pluginLog.Warning("Disable() ignored: hooks not active.");
-            return;
-        }
-
-        _hooksActive = false;
-        SaveConfig();
-
-        _repairKitWindow?.DisableShopListeners();
-        _ceruleumTankWindow?.DisableShopListeners();
-        addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "ContextIconMenu", ContextIconMenuPostReceiveEvent);
-        addonLifecycle.UnregisterListener(AddonEvent.PostRefresh, "Request", RequestPostRefresh);
-        addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "Request", RequestPostSetup);
-        addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "SelectYesno", SelectYesNoPostSetup);
-
-        _commandManager.RemoveHandler("/fill-tanks");
-        _commandManager.RemoveHandler("/buy-tanks");
-        _commandManager.RemoveHandler("/workshoppa");
-        _commandManager.RemoveHandler("/ws");
-
-        _framework.Update -= OnFrameworkUpdate;
-
-        if (CurrentStage != Stage.Stopped)
-        {
-            _externalPluginHandler.Restore();
-            CurrentStage = Stage.Stopped;
-        }
-
-        if (_mainWindow != null && _mainWindow.IsOpen) _mainWindow.IsOpen = false;
-        if (_repairKitWindow != null) _repairKitWindow.IsOpen = false;
-        if (_ceruleumTankWindow != null) _ceruleumTankWindow.IsOpen = false;
-    }
-
     // ----------------------------
     // Config Handlers
     // ----------------------------
-    public static void LoadConfig()
-    {
-        /*_configuration = VIWIContext.PluginInterface.GetPluginConfig() as WorkshoppaConfig ?? new WorkshoppaConfig();
-        SaveConfig();*/
-    }
 
-    public static void SaveConfig()
-    {
-        //_configuration?.Save();
-    }
     public void ToggleWorkshoppaUi()
     {
         if (!_configuration.Enabled) return;
@@ -241,7 +171,7 @@ internal sealed partial class WorkshoppaModule : IVIWIModule
         {
             if (_currentStageInternal != value)
             {
-                _pluginLog.Debug($"Changing stage from {_currentStageInternal} to {value}");
+                PluginLog.Debug($"Changing stage from {_currentStageInternal} to {value}");
                 _currentStageInternal = value;
             }
 
@@ -253,22 +183,11 @@ internal sealed partial class WorkshoppaModule : IVIWIModule
     }
     private void OnFrameworkUpdate(IFramework framework)
     {
-        var tick = Environment.TickCount64; // if you don't have this, use Environment.TickCount64 but framecounter is best
-        if (_lastUpdateTick == tick)
-        {
-            _updateReentryCount++;
-            _pluginLog.Error($"FrameworkUpdate re-entered in same frame! count={_updateReentryCount}, stage={CurrentStage}");
-            return; // IMPORTANT: do not run logic twice in same frame
-        }
-
-        _lastUpdateTick = tick;
-        _updateReentryCount = 0;
-
-        if (!_clientState.IsLoggedIn ||
-            !WorkshopTerritories.Contains(_clientState.TerritoryType) ||
-            _condition[ConditionFlag.BoundByDuty] ||
-            _condition[ConditionFlag.BetweenAreas] ||
-            _condition[ConditionFlag.BetweenAreas51] ||
+        if (!ClientState.IsLoggedIn ||
+            !WorkshopTerritories.Contains(ClientState.TerritoryType) ||
+            Condition[ConditionFlag.BoundByDuty] ||
+            Condition[ConditionFlag.BetweenAreas] ||
+            Condition[ConditionFlag.BetweenAreas51] ||
             GetDistanceToEventObject(_fabricationStationIds, out var fabricationStation) >= 3f)
         {
             _mainWindow.NearFabricationStation = false;
@@ -298,6 +217,9 @@ internal sealed partial class WorkshoppaModule : IVIWIModule
                 {
                     _externalPluginHandler.Restore();
                     CurrentStage = Stage.Stopped;
+                    _turninCount = 0;
+                    _configuration.Mode = TurnInMode.Normal;
+                    SaveConfig();
                 }
 
                 return;
@@ -311,7 +233,7 @@ internal sealed partial class WorkshoppaModule : IVIWIModule
             }
 
             if (CurrentStage != Stage.Stopped && CurrentStage != Stage.RequestStop && !_externalPluginHandler.Saved)
-                //_externalPluginHandler.Save();
+                _externalPluginHandler.Save();
 
             switch (CurrentStage)
             {
@@ -319,7 +241,13 @@ internal sealed partial class WorkshoppaModule : IVIWIModule
                     if (CheckContinueWithDelivery())
                         CurrentStage = Stage.ContributeMaterials;
                     else
+                    { 
+                        if (_configuration.Mode == TurnInMode.Leveling && _configuration.ItemQueue.Count == 0)
+                        {
+                            EnqueueLevelingProject(1002, quantity: 1);
+                        }
                         TakeItemFromQueue();
+                    }
                     break;
 
                 case Stage.TargetFabricationStation:
@@ -340,10 +268,6 @@ internal sealed partial class WorkshoppaModule : IVIWIModule
                     SelectCraftCategory();
                     break;
 
-                case Stage.WaitCraftLogRefresh:
-                    WaitCraftLogRefresh();
-                    break;
-
                 case Stage.SelectCraft:
                     SelectCraft();
                     break;
@@ -354,6 +278,8 @@ internal sealed partial class WorkshoppaModule : IVIWIModule
 
                 case Stage.RequestStop:
                     _externalPluginHandler.Restore();
+                    _turninCount = 0;
+                    _configuration.Mode = TurnInMode.Normal;
                     CurrentStage = Stage.Stopped;
                     break;
 
@@ -362,14 +288,17 @@ internal sealed partial class WorkshoppaModule : IVIWIModule
                     break;
 
                 case Stage.ContributeMaterials:
-                    ContributeMaterials();
+                    if (_configuration.Mode == TurnInMode.Leveling)
+                        ContributeSpecificMaterial();
+                    else
+                        ContributeMaterials();
                     break;
 
                 case Stage.OpenRequestItemWindow:
-                    // see RequestPostSetup and related
-                    if (DateTime.Now > _fallbackAt)
-                        goto case Stage.ContributeMaterials;
-                    break;
+                // see RequestPostSetup and related
+                if (DateTime.Now > _fallbackAt)
+                    goto case Stage.ContributeMaterials;
+                break;
 
                 case Stage.OpenRequestItemSelect:
                 case Stage.ConfirmRequestItemWindow:
@@ -384,20 +313,31 @@ internal sealed partial class WorkshoppaModule : IVIWIModule
                 case Stage.ConfirmCollectProduct:
                     // see SelectYesNoPostSetup
                     break;
+                case Stage.CloseDeliveryMenu:
+                    CloseMaterialDelivery();
+                    break;
+                case Stage.DiscontinueProject:
+                    break;
 
                 case Stage.Stopped:
                     break;
 
                 default:
-                    _pluginLog.Warning($"Unknown stage {CurrentStage}");
+                    PluginLog.Warning($"Unknown stage {CurrentStage}");
                     break;
             }
         }
     }
-    private WorkshopCraft GetCurrentCraft()
+    private bool TryGetCurrentCraft(out WorkshopCraft craft)
     {
-        return _workshopCache.Crafts.Single(
-            x => x.WorkshopItemId == _configuration.CurrentlyCraftedItem!.WorkshopItemId);
+        craft = default;
+
+        var id = _configuration.CurrentlyCraftedItem?.WorkshopItemId;
+        if (id == null)
+            return false;
+
+        craft = _workshopCache.Crafts.FirstOrDefault(x => x.WorkshopItemId == id.Value);
+        return craft.WorkshopItemId != 0;
     }
     private void ProcessCommand(string command, string arguments)
     {
@@ -407,22 +347,44 @@ internal sealed partial class WorkshoppaModule : IVIWIModule
             _mainWindow.Toggle(WorkshoppaWindow.EOpenReason.Command);
     }
 
-    private void ProcessBuyCommand(string command, string arguments)
+    private void ProcessFuelBuyCommand(string command, string arguments)
     {
         if (_ceruleumTankWindow.TryParseBuyRequest(arguments, out int missingQuantity))
             _ceruleumTankWindow.StartPurchase(missingQuantity);
         else
-            _chatGui.PrintError($"Usage: {command} <stacks>");
+            ChatGui.PrintError($"Usage: {command} <stacks>");
     }
 
-    private void ProcessFillCommand(string command, string arguments)
+    private void ProcessFuelFillCommand(string command, string arguments)
     {
         if (_ceruleumTankWindow.TryParseFillRequest(arguments, out int missingQuantity))
             _ceruleumTankWindow.StartPurchase(missingQuantity);
         else
-            _chatGui.PrintError($"Usage: {command} <stacks>");
+            ChatGui.PrintError($"Usage: {command} <stacks>");
+    }
+    private void ProcessStoneBuyCommand(string command, string arguments)
+    {
+        if (_mudstoneWindow.TryParseBuyRequest(arguments, out int missingQuantity))
+            _mudstoneWindow.StartPurchase(missingQuantity);
+        else
+            ChatGui.PrintError($"Usage: {command} <stacks>");
     }
 
+    private void ProcessStoneFillCommand(string command, string arguments)
+    {
+        if (_mudstoneWindow.TryParseFillRequest(arguments, out int missingQuantity))
+            _mudstoneWindow.StartPurchase(missingQuantity);
+        else
+            ChatGui.PrintError($"Usage: {command} <stacks>");
+    }
+    private void ProcessDarkMatterCommand(string command, string arguments)
+    {
+        _repairKitWindow.ShopLogic();
+    }
+    private void ProcessLevelingCommand(string command, string arguments)
+    {
+        _mainWindow.StartLevelingConditions();
+    }
     public void OpenWorkshoppa()
     {
         if (!_configuration.Enabled) return;

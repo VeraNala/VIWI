@@ -8,8 +8,8 @@ namespace VIWI.UI.Pages
     {
         public string DisplayName => "AoEasy";
         public string Category => "Modules";
-        public bool SupportsEnableToggle => true;
         public string Version => AoEasyModule.ModuleVersion;
+        public bool SupportsEnableToggle => true;
 
         public bool IsEnabled
         {
@@ -18,13 +18,18 @@ namespace VIWI.UI.Pages
 
         public void SetEnabled(bool value)
         {
-            AoEasyModule._configuration.Enabled = value;
-            AoEasyModule.SaveConfig();
+            AoEasyModule.Instance?.SetEnabled(value);
         }
 
         public void Draw()
         {
-            var config = AoEasyModule._configuration;
+            var module = AoEasyModule.Instance;
+            var config = module?._configuration;
+            if (config == null)
+            {
+                ImGui.TextDisabled("AoEasy is not initialized yet.");
+                return;
+            }
             ImGuiHelpers.ScaledDummy(4f);
             ImGui.TextUnformatted($"AoEasy – Stop Running Away From Me! - V{Version}");
             ImGui.TextUnformatted($"Enabled: {config.Enabled}");

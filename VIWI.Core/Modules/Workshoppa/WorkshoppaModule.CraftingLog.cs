@@ -1,21 +1,15 @@
 using Dalamud.Game.ClientState.Objects.Types;
-using ECommons.Throttlers;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using System;
-using System.Configuration;
 using System.Linq;
-using VIWI.Core;
 using VIWI.Helpers;
-using VIWI.Modules.Workshoppa.GameData;
+using static VIWI.Core.VIWIContext;
 using ValueType = FFXIVClientStructs.FFXIV.Component.GUI.ValueType;
 
 namespace VIWI.Modules.Workshoppa;
 
 internal sealed partial class WorkshoppaModule
 {
-    private uint _lastShownCount;
-    private uint _stableFrames;
-
     private void InteractWithFabricationStation(IGameObject fabricationStation)
         => InteractWithTarget(fabricationStation);
 
@@ -42,7 +36,7 @@ internal sealed partial class WorkshoppaModule
                     _configuration.ItemQueue.Remove(firstItem);
             }
 
-            //_pluginInterface.SavePluginConfig(_configuration);
+            SaveConfig();
             if (_configuration.CurrentlyCraftedItem != null)
                 CurrentStage = Stage.TargetFabricationStation;
             else
@@ -60,112 +54,102 @@ internal sealed partial class WorkshoppaModule
 
     private unsafe void SelectCraftCategory()
     {
-        var addon = GetCompanyCraftingLogAddon();
-        if (addon == null || !addon->IsVisible) return;
-        if (addon->AtkValues == null || addon->AtkValuesCount < 20) return;
+        AtkUnitBase* addonCraftingLog = GetCompanyCraftingLogAddon();
+        if (addonCraftingLog == null)
+            return;
 
-        var craft = GetCurrentCraft();
-        _pluginLog.Information($"Selecting category {craft.Category} and type {craft.Type}");
+        if (!TryGetCurrentCraft(out var craft))
+        {
+            ChatGui.PrintError("[Workshoppa] Current craft was not found in WorkshopCache. Stopping.");
+            PluginLog.Error("[Workshoppa] TryGetCurrentCraft failed in SelectCraftCategory.");
+            CurrentStage = Stage.RequestStop;
+            return;
+        }
+        PluginLog.Information($"Selecting category {craft.Category} and type {craft.Type}");
+        var selectCategory = stackalloc AtkValue[]
+        {
+            new() { Type = ValueType.Int, Int = 2 },
+            new() { Type = 0, Int = 0 },
+            new() { Type = ValueType.UInt, UInt = (uint)craft.Category },
+            new() { Type = ValueType.UInt, UInt = craft.Type },
+            new() { Type = ValueType.UInt, Int = 0 },
+            new() { Type = ValueType.UInt, Int = 0 },
+            new() { Type = ValueType.UInt, Int = 0 },
+            new() { Type = 0, Int = 0 }
+        };
+        
+        try
+        {
+            addonCraftingLog->FireCallback(8, selectCategory);
+        }
+        catch (Exception ex)
+        {
+            ChatGui.PrintError("[Workshoppa] That workshop category/type appears to be unavailable (likely not unlocked?). Stopping.");
+            PluginLog.Error(ex, $"[Workshoppa] FireCallback failed for {craft.Name}, Category={craft.Category} Type={craft.Type}.");
+            CurrentStage = Stage.RequestStop;
+            _continueAt = DateTime.Now.AddSeconds(0.5);
+            return;
+        }
 
-        var args = stackalloc AtkValue[8];
-        args[0] = new() { Type = ValueType.Int, Int = 2 };
-        args[1] = new() { Type = ValueType.Int, Int = 0 };
-        args[2] = new() { Type = ValueType.UInt, UInt = (uint)craft.Category };
-        args[3] = new() { Type = ValueType.UInt, UInt = craft.Type };
-        args[4] = new() { Type = ValueType.Int, Int = 0 };
-        args[5] = new() { Type = ValueType.Int, Int = 0 };
-        args[6] = new() { Type = ValueType.Int, Int = 0 };
-        args[7] = new() { Type = ValueType.Int, Int = 0 };
-
-        addon->FireCallback(8, args);
-        CurrentStage = Stage.WaitCraftLogRefresh;
-        _stableFrames = 0;
-        _lastShownCount = 0;
+        CurrentStage = Stage.SelectCraft;
         _continueAt = DateTime.Now.AddSeconds(0.1);
-    }
-
-    private unsafe void WaitCraftLogRefresh()
-    {
-        var addon = GetCompanyCraftingLogAddon();
-        if (addon == null || !addon->IsVisible) return;
-        if (addon->AtkValues == null || addon->AtkValuesCount < 20) return;
-
-        var atk = addon->AtkValues;
-        var shown = atk[13].UInt;
-
-        if (shown == 0)
-        {
-            _stableFrames = 0;
-            return;
-        }
-        var maxIndex = 17 + 4 * (int)(shown - 1);
-        if (maxIndex >= addon->AtkValuesCount)
-        {
-            _stableFrames = 0;
-            return;
-        }
-        if (shown == _lastShownCount)
-            _stableFrames++;
-        else
-        {
-            _lastShownCount = shown;
-            _stableFrames = 0;
-            return;
-        }
-        if (_stableFrames >= 2)
-        {
-            CurrentStage = Stage.SelectCraft;
-            _continueAt = DateTime.Now;
-        }
     }
 
     private unsafe void SelectCraft()
     {
-        var addon = GetCompanyCraftingLogAddon();
-        if (addon == null || !addon->IsVisible) return;
-        if (addon->AtkValues == null || addon->AtkValuesCount < 20) return;
+        AtkUnitBase* addonCraftingLog = GetCompanyCraftingLogAddon();
+        if (addonCraftingLog == null)
+            return;
 
-        var craft = GetCurrentCraft();
-        var atk = addon->AtkValues;
-
-        var shown = atk[13].UInt;
-        if (shown == 0) return;
-
-        var maxIndex = 17 + 4 * (int)(shown - 1);
-        if (maxIndex >= addon->AtkValuesCount) return;
-
-        bool found = false;
-        for (int i = 0; i < (int)shown; i++)
+        if (!TryGetCurrentCraft(out var craft))
         {
-            var id = atk[14 + 4 * i].UInt;
-            if (id == craft.WorkshopItemId)
-            {
-                found = true;
-                break;
-            }
+            ChatGui.PrintError("[Workshoppa] Current craft was not found in WorkshopCache. Stopping.");
+            PluginLog.Error("[Workshoppa] TryGetCurrentCraft failed in SelectCraft.");
+            CurrentStage = Stage.RequestStop;
+            return;
         }
+        var atkValues = addonCraftingLog->AtkValues;
 
-        if (!found)
+        uint shownItemCount = atkValues[13].UInt;
+        var visibleItems = Enumerable.Range(0, (int)shownItemCount)
+            .Select(i => new
+            {
+                WorkshopItemId = atkValues[14 + 4 * i].UInt,
+                Name = atkValues[17 + 4 * i].ReadAtkString(),
+            })
+            .ToList();
+
+        if (visibleItems.All(x => x.WorkshopItemId != craft.WorkshopItemId))
         {
-            _pluginLog.Error($"Could not find {craft.Name} in current list, is it unlocked?");
+            PluginLog.Error($"Could not find {craft.Name} in current list, is it unlocked?");
             CurrentStage = Stage.RequestStop;
             return;
         }
 
-        _pluginLog.Information($"Selecting craft {craft.WorkshopItemId}");
-
-        var args = stackalloc AtkValue[8];
-        args[0] = new() { Type = ValueType.Int, Int = 1 };
-        args[1] = new() { Type = ValueType.Int, Int = 0 };
-        args[2] = new() { Type = ValueType.Int, Int = 0 };
-        args[3] = new() { Type = ValueType.Int, Int = 0 };
-        args[4] = new() { Type = ValueType.UInt, UInt = craft.WorkshopItemId };
-        args[5] = new() { Type = ValueType.Int, Int = 0 };
-        args[6] = new() { Type = ValueType.Int, Int = 0 };
-        args[7] = new() { Type = ValueType.Int, Int = 0 };
-
-        addon->FireCallback(8, args);
-
+        PluginLog.Information($"Selecting craft {craft.WorkshopItemId}");
+        var selectCraft = stackalloc AtkValue[]
+        {
+            new() { Type = ValueType.Int, Int = 1 },
+            new() { Type = 0, Int = 0 },
+            new() { Type = 0, Int = 0 },
+            new() { Type = 0, Int = 0 },
+            new() { Type = ValueType.UInt, UInt = craft.WorkshopItemId },
+            new() { Type = 0, Int = 0 },
+            new() { Type = 0, Int = 0 },
+            new() { Type = 0, Int = 0 }
+        };
+        try
+        {
+            addonCraftingLog->FireCallback(8, selectCraft);
+        }
+        catch (Exception ex)
+        {
+            ChatGui.PrintError("[Workshoppa] That workshop craft appears to be unavailable (likely not unlocked?). Stopping.");
+            PluginLog.Error(ex, $"[Workshoppa] FireCallback failed for {craft.Name}, Category={craft.Category} Type={craft.Type}.");
+            CurrentStage = Stage.RequestStop;
+            _continueAt = DateTime.Now.AddSeconds(0.5);
+            return;
+        }
         CurrentStage = Stage.ConfirmCraft;
         _continueAt = DateTime.Now.AddSeconds(0.1);
     }
@@ -175,7 +159,7 @@ internal sealed partial class WorkshoppaModule
         if (SelectSelectYesno(0, s => s.StartsWith("Craft ", StringComparison.Ordinal)))
         {
             _configuration.CurrentlyCraftedItem!.StartedCrafting = true;
-            //_pluginInterface.SavePluginConfig(_configuration);
+            SaveConfig();
 
             CurrentStage = Stage.TargetFabricationStation;
         }

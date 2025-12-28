@@ -40,10 +40,21 @@ namespace VIWI.UI.Pages
             if (VIWIContext.ObjectTable.LocalPlayer != null)
             {
                 var localPlayer = VIWIContext.ObjectTable.LocalPlayer;
+                var playerState = VIWIContext.PlayerState;
+                var currentLevel = localPlayer.Level;
+                var targetLevel = 60;
+
+                var expRemaining = ExpCalc.GetExpRemainingToLevel(
+                    VIWIContext.DataManager,
+                    VIWIContext.PlayerState,
+                    currentLevel,
+                    targetLevel);
+
                 ImGui.BulletText($"Name: {localPlayer.Name} @ {localPlayer.HomeWorld.Value.Name}");
                 ImGui.BulletText($"Current World: {localPlayer.CurrentWorld.Value.Name}");
-                ImGui.BulletText(
-                    $"Job: ({localPlayer.ClassJob.RowId}) \"{localPlayer.ClassJob.Value.Abbreviation}\"  Level: {localPlayer.Level}");
+                ImGui.BulletText($"Job: ({localPlayer.ClassJob.RowId}) \"{localPlayer.ClassJob.Value.Abbreviation}\"  Level: {localPlayer.Level}");
+                ImGui.BulletText($"ClassJobLevel: {playerState.GetClassJobLevel(localPlayer.ClassJob.Value)}, Exp: {playerState.GetClassJobExperience(localPlayer.ClassJob.Value)}");
+                //ImGui.TextUnformatted($"EXP needed to reach {targetLevel}: {expRemaining:N0}");
 
                 var territoryId = VIWIContext.ClientState.TerritoryType;
                 if (VIWIContext.DataManager.GetExcelSheet<TerritoryType>()

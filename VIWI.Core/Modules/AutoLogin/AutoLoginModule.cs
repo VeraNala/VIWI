@@ -1,12 +1,9 @@
-using Dalamud.Game;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using ECommons;
 using ECommons.Automation.NeoTaskManager;
 using ECommons.Automation.UIInput;
-using ECommons.Configuration;
 using ECommons.ExcelServices;
-using ECommons.Logging;
 using ECommons.Throttlers;
 using ECommons.UIHelpers.AddonMasterImplementations;
 using FFXIVClientStructs.FFXIV.Component.GUI;
@@ -14,37 +11,32 @@ using Lumina.Excel.Sheets;
 using System;
 using System.Linq;
 using System.Runtime.InteropServices;
-using TerraFX.Interop.DirectX;
 using VIWI.Core;
-using VIWI.Core.Config;
 using VIWI.Helpers;
+using static VIWI.Core.VIWIContext;
 
 namespace VIWI.Modules.AutoLogin
 {
-    internal unsafe class AutoLoginModule : IVIWIModule
+    internal unsafe class AutoLoginModule : VIWIModuleBase<AutoLoginConfig>
     {
         public const string ModuleName = "AutoLogin";
-        public const string ModuleVersion = "1.0.2";
-
-        public string Name => ModuleName;
-        public string Version => ModuleVersion;
-
+        public const string ModuleVersion = "1.0.3";
+        public override string Name => ModuleName;
+        public override string Version => ModuleVersion;
+        public AutoLoginConfig _configuration => ModuleConfig;
+        private VIWIConfig Core => CoreConfig;
         internal static AutoLoginModule? Instance { get; private set; }
+        public static bool Enabled => Instance?._configuration.Enabled ?? false;
 
-        private VIWIConfig vConfig = null!;
-        public static AutoLoginConfig _configuration = null!;
-        public static bool Enabled => _configuration?.Enabled ?? false;
+        protected override AutoLoginConfig CreateConfig() => new AutoLoginConfig();
+        protected override AutoLoginConfig GetConfigBranch(VIWIConfig core) => core.AutoLogin;
+        protected override void SetConfigBranch(VIWIConfig core, AutoLoginConfig _configuration) => core.AutoLogin = _configuration;
+        protected override bool GetEnabled(AutoLoginConfig _configuration) => _configuration.Enabled;
+        protected override void SetEnabledValue(AutoLoginConfig _configuration, bool enabled) => _configuration.Enabled = enabled;
+        public void SaveConfig() => Core.Save();
 
-        private readonly ICommandManager commandManager;
-        private readonly IDataManager dataManager;
-        private readonly IFramework framework;
-        private readonly IClientState clientState;
-        private readonly IPlayerState playerState;
-        private readonly IGameGui gameGui;
-        private readonly ISigScanner sigScanner;
-        private readonly IGameInteropProvider hookProvider;
 
-        private TaskManager taskManager = new();
+        private readonly TaskManager taskManager = new();
 
         //internal IntPtr StartHandler;
         //internal IntPtr LoginHandler;
@@ -59,95 +51,75 @@ namespace VIWI.Modules.AutoLogin
         private bool _inErrorRecovery = false;
 
         // ----------------------------
-        // Construction / init
+        // Module Base
         // ----------------------------
-
-        public AutoLoginModule()
-        {
-            commandManager = VIWIContext.CommandManager;
-            dataManager = VIWIContext.DataManager;
-            framework = VIWIContext.Framework;
-            clientState = VIWIContext.ClientState;
-            playerState = VIWIContext.PlayerState;
-            gameGui = VIWIContext.GameGui;
-            sigScanner = VIWIContext.SigScanner;
-            hookProvider = VIWIContext.HookProvider;
-        }
-        // ----------------------------
-        // Skeleton Loop
-        // ----------------------------
-
-        public void Initialize(VIWIConfig config)
+        public override void Initialize(VIWIConfig config)
         {
             Instance = this;
-            vConfig = config ?? throw new ArgumentNullException(nameof(config));
-
-            if (vConfig.AutoLogin == null)
-                vConfig.AutoLogin = new AutoLoginConfig();
-
-            _configuration = vConfig.AutoLogin;
-
-            PluginLog.Information("[AutoLogin] Module initialized.");
-            PluginLog.Information($"[AutoLogin] Module Config Loaded. Enabled={_configuration.Enabled}");
+            base.Initialize(config);
 
             if (_configuration.Enabled)
                 Enable();
         }
-        private void Enable()
+
+        public override void Enable()
         {
             NoKill();
 
             UpdateConfig();
-            framework.Update += OnFrameworkUpdate;
-            clientState.Login += OnLogin;
-            clientState.Logout += OnLogout;
-            clientState.TerritoryChanged += TerritoryChange;
+            Framework.Update += OnFrameworkUpdate;
+            ClientState.Login += OnLogin;
+            ClientState.Logout += OnLogout;
+            ClientState.TerritoryChanged += TerritoryChange;
         }
 
-        private void Disable()
+        public override void Disable()
         {
-            framework.Update -= OnFrameworkUpdate;
-            clientState.Login -= OnLogin;
-            clientState.Logout -= OnLogout;
-            clientState.TerritoryChanged -= TerritoryChange;
+            Framework.Update -= OnFrameworkUpdate;
+            ClientState.Login -= OnLogin;
+            ClientState.Logout -= OnLogout;
+            ClientState.TerritoryChanged -= TerritoryChange;
 
-            taskManager.Dispose();
+            taskManager.Abort();
+            LobbyErrorHandlerHook?.Disable();
+            LobbyErrorHandlerHook?.Dispose();
+            LobbyErrorHandlerHook = null;
+            noKillHookInitialized = false;
         }
-
-        public void SetEnabled(bool value)
+        public override void Dispose()
         {
-            var inst = Instance;
+            Disable();
 
-            if (inst == null)
+            try
             {
-                PluginLog.Error("[AutoLogin] SetEnabled called but module is not initialized (Instance is null).");
-                return;
+                Framework.Update -= OnFrameworkUpdate;
+                ClientState.Login -= OnLogin;
+                ClientState.Logout -= OnLogout;
+                ClientState.TerritoryChanged -= TerritoryChange;
+                taskManager.Dispose();
+                if (LobbyErrorHandlerHook != null)
+                {
+                    if (LobbyErrorHandlerHook.IsEnabled)
+                        LobbyErrorHandlerHook.Disable();
+
+                    LobbyErrorHandlerHook.Dispose();
+                    LobbyErrorHandlerHook = null;
+                    noKillHookInitialized = false;
+
+                    PluginLog.Information("[AutoLogin] LobbyErrorHandler hook disposed.");
+                }
+            }
+            catch
+            {
             }
 
-            if (_configuration == null)
-            {
-                PluginLog.Error("[AutoLogin] SetEnabled called but config is null (module init incomplete).");
-                return;
-            }
-
-            _configuration.Enabled = value;
-            inst.vConfig.Save();
-
-            if (value) inst.Enable();
-            else inst.Disable();
+            if (Instance == this)
+                Instance = null;
+            PluginLog.Information("[AutoLogin] Disposed.");
         }
 
         // ----------------------------
-        // Config Handlers
-        // ----------------------------
-
-        public void SaveConfig()
-        {
-            vConfig.Save();
-        }
-
-        // ----------------------------
-        // Commands & Events
+        // Core Logic
         // ----------------------------
 
         private void OnLogin()
@@ -187,8 +159,8 @@ namespace VIWI.Modules.AutoLogin
             if (noKillHookInitialized && LobbyErrorHandlerHook is { IsEnabled: true })
                 return;
 
-            LobbyErrorHandler = sigScanner.ScanText("40 53 48 83 EC 30 48 8B D9 49 8B C8 E8 ?? ?? ?? ?? 8B D0");
-            LobbyErrorHandlerHook = hookProvider.HookFromAddress<LobbyErrorHandlerDelegate>(
+            LobbyErrorHandler = SigScanner.ScanText("40 53 48 83 EC 30 48 8B D9 49 8B C8 E8 ?? ?? ?? ?? 8B D0");
+            LobbyErrorHandlerHook = HookProvider.HookFromAddress<LobbyErrorHandlerDelegate>(
                 LobbyErrorHandler,
                 LobbyErrorHandlerDetour);
 
@@ -221,7 +193,7 @@ namespace VIWI.Modules.AutoLogin
                 }
             }
             PluginLog.Debug($"After LobbyErrorHandler a1:{a1} a2:{a2} a3:{a3} t1:{t1} v4:{v4_16}");
-            return this.LobbyErrorHandlerHook.Original(a1, a2, a3);
+            return this.LobbyErrorHandlerHook!.Original(a1, a2, a3);
         }
         private void TerritoryChange(ushort obj)
         {
@@ -231,8 +203,8 @@ namespace VIWI.Modules.AutoLogin
 
         private void UpdateConfig()
         {
-            var player = playerState;
-            if (!clientState.IsLoggedIn || player == null)
+            var player = PlayerState;
+            if (!ClientState.IsLoggedIn || player == null)
                 return;
 
             if (player.CharacterName != _configuration.CharacterName || string.IsNullOrEmpty(_configuration.CharacterName))
@@ -244,7 +216,7 @@ namespace VIWI.Modules.AutoLogin
             {
                 _configuration.HomeWorldName = player.HomeWorld.Value.Name.ExtractText();
             }
-            var worldSheet = dataManager.GetExcelSheet<World>();
+            var worldSheet = DataManager.GetExcelSheet<World>();
             var worldRow = worldSheet?.GetRow(player.HomeWorld.RowId);
             if (worldRow != null)
             {
@@ -315,10 +287,6 @@ namespace VIWI.Modules.AutoLogin
             if (taskManager.IsBusy) return;
         }
 
-        // ----------------------------
-        // Core logic
-        // ----------------------------
-
         public void StartAutoLogin()
         {
             if (!_configuration.Enabled) return;
@@ -336,13 +304,13 @@ namespace VIWI.Modules.AutoLogin
         }
         private bool HasLobbyErrorDialogue()
         {
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "Dialogue", out var d) && d->IsVisible) return true;
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "Dialogue", out var d) && d->IsVisible) return true;
 
             return false;
         }
         private bool ClearDisconnectErrors()
         {
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "Dialogue", out var dialogue) && GenericHelpers.IsAddonReady(dialogue) && dialogue->IsVisible)
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "Dialogue", out var dialogue) && GenericHelpers.IsAddonReady(dialogue) && dialogue->IsVisible)
             {
                 if (EzThrottler.Throttle("AutoLogin.Clear.DialogueOk", 800))
                 {
@@ -363,13 +331,13 @@ namespace VIWI.Modules.AutoLogin
         private bool SelectDataCenterMenu()  // Title Screen -> Selecting Data Center Menu
         {
             if (GuardAgainstErrors()) return false;
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "TitleDCWorldMap", out var dcMenu) && dcMenu->IsVisible)
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "TitleDCWorldMap", out var dcMenu) && dcMenu->IsVisible)
             {
                 PluginLog.Information("[AutoLogin] DC Selection Menu Visible");
                 return true;
             }
 
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "_TitleMenu", out var titleMenuAddon) && GenericHelpers.IsAddonReady(titleMenuAddon))
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "_TitleMenu", out var titleMenuAddon) && GenericHelpers.IsAddonReady(titleMenuAddon))
             {
                 var menu = new AddonMaster._TitleMenu((void*)titleMenuAddon);
 
@@ -387,16 +355,16 @@ namespace VIWI.Modules.AutoLogin
         private bool SelectDataCenter(int dc, string currWorld)
         {
             if (GuardAgainstErrors()) return false;
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "_CharaSelectListMenu", out var charaMenu) && charaMenu->IsVisible)
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "_CharaSelectListMenu", out var charaMenu) && charaMenu->IsVisible)
             {
                 PluginLog.Information("[AutoLogin] Character Selection Menu Visible");
                 return true;
             }
 
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "TitleDCWorldMap", out var dcMenuAddon) && GenericHelpers.IsAddonReady(dcMenuAddon))
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "TitleDCWorldMap", out var dcMenuAddon) && GenericHelpers.IsAddonReady(dcMenuAddon))
             {
                 var targetDc = dc;
-                var worldSheet = dataManager.GetExcelSheet<World>();
+                var worldSheet = DataManager.GetExcelSheet<World>();
                 var visitingWorldRow = worldSheet?
                     .FirstOrDefault(row => row.Name.ExtractText()
                         .Equals(currWorld, StringComparison.Ordinal));
@@ -452,13 +420,13 @@ namespace VIWI.Modules.AutoLogin
 
         private bool? SelectCharacter(string name, string homeWorld, string currWorld, int dc)
         {
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "SelectYesno", out _) || AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "SelectOk", out _))
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "SelectYesno", out _) || AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "SelectOk", out _))
                 return true;
 
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "_CharaSelectListMenu", out var charMenuAddon) && GenericHelpers.IsAddonReady(charMenuAddon))
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "_CharaSelectListMenu", out var charMenuAddon) && GenericHelpers.IsAddonReady(charMenuAddon))
             {
                 var menu = new AddonMaster._CharaSelectListMenu((void*)charMenuAddon);
-                var worldSheet = dataManager.GetExcelSheet<World>();
+                var worldSheet = DataManager.GetExcelSheet<World>();
                 var currWorldRow = worldSheet?
                     .FirstOrDefault(row =>
                         row.Name.ExtractText().Equals(currWorld, StringComparison.Ordinal));
@@ -489,10 +457,10 @@ namespace VIWI.Modules.AutoLogin
 
         private bool? ConfirmLogin()
         {
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "SelectOk", out _)) return true;
-            if (clientState.IsLoggedIn) return true;
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "SelectOk", out _)) return true;
+            if (ClientState.IsLoggedIn) return true;
 
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "SelectYesno", out var yesnoPtr) && GenericHelpers.IsAddonReady(yesnoPtr))
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "SelectYesno", out var yesnoPtr) && GenericHelpers.IsAddonReady(yesnoPtr))
             {
                 var m = new AddonMaster.SelectYesno((void*)yesnoPtr);
                 if (m.Text.Contains("Log in", StringComparison.OrdinalIgnoreCase) || m.Text.Contains("Logging in", StringComparison.OrdinalIgnoreCase) || m.Text.Contains("last logged out", StringComparison.Ordinal))
@@ -519,55 +487,19 @@ namespace VIWI.Modules.AutoLogin
         }
         private unsafe bool IsLobbyError2002Screen()
         {
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, "Dialogue", out var dialogue) &&
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "Dialogue", out var dialogue) &&
                 GenericHelpers.IsAddonReady(dialogue) && dialogue->IsVisible)
             {
                 return true;
             }
             foreach (var name in new[] { "_TitleError", "TitleError", "TitleServerError", "TitleNetworkError" })
             {
-                if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(gameGui, name, out var a) &&
+                if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, name, out var a) &&
                     GenericHelpers.IsAddonReady(a) && a->IsVisible)
                     return true;
             }
 
             return false;
-        }
-
-        // ----------------------------
-        // Utilities
-        // ----------------------------
-
-        public void Dispose()
-        {
-            Disable();
-
-            try
-            {
-                framework.Update -= OnFrameworkUpdate;
-                clientState.Login -= OnLogin;
-                clientState.Logout -= OnLogout;
-                clientState.TerritoryChanged -= TerritoryChange;
-                if (LobbyErrorHandlerHook != null)
-                {
-                    if (LobbyErrorHandlerHook.IsEnabled)
-                        LobbyErrorHandlerHook.Disable();
-
-                    LobbyErrorHandlerHook.Dispose();
-                    LobbyErrorHandlerHook = null;
-                    noKillHookInitialized = false;
-
-                    PluginLog.Information("[AutoLogin] LobbyErrorHandler hook disposed.");
-                }
-            }
-            catch
-            {
-            }
-
-            if (Instance == this)
-                Instance = null;
-
-            PluginLog.Information("[AutoLogin] Disposed.");
         }
     }
 }

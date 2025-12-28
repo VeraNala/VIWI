@@ -1,4 +1,3 @@
-using Dalamud.Configuration;
 using System;
 
 namespace VIWI.Modules.AoEasy
@@ -8,11 +7,6 @@ namespace VIWI.Modules.AoEasy
     {
         public int Version { get; set; } = 1;
 
-        public bool Enabled = false;
-
-        public void Save()
-        {
-            //VIWI.Core.VIWIContext.PluginInterface.SavePluginConfig(this);
-        }
+        public bool Enabled { get; set; } = false;
     }
 }

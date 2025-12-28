@@ -1,22 +1,24 @@
 using Dalamud.Configuration;
 using Dalamud.Plugin;
-using ECommons.Logging;
+using Dalamud.Plugin.Services;
 using System;
 using VIWI.Modules.AoEasy;
 using VIWI.Modules.AutoLogin;
 using VIWI.Modules.Workshoppa;
 
-namespace VIWI.Core.Config
+namespace VIWI.Core
 {
     [Serializable]
     public sealed class VIWIConfig : IPluginConfiguration
     {
         public int Version { get; set; } = 1;
-        public bool Enabled = true;
+        public IPluginLog? pluginLog;
 
+        public AoEasyConfig AoEasy { get; set; } = new();
         public AutoLoginConfig AutoLogin { get; set; } = new();
         public WorkshoppaConfig Workshoppa { get; set; } = new();
-        public AoEasyConfig AoEasy { get; set; } = new();
+
+
 
         [NonSerialized]
         private IDalamudPluginInterface? pluginInterface;
@@ -30,18 +32,17 @@ namespace VIWI.Core.Config
         {
             if (pluginInterface == null)
             {
-                PluginLog.Error("[VIWIConfig] Save() called but pluginInterface is null. Did you forget Config.Initialize(pi)?");
                 return;
             }
 
             try
             {
                 pluginInterface.SavePluginConfig(this);
-                PluginLog.Information("[VIWIConfig] Saved config.");
+                pluginLog?.Information("[VIWI] Saved CONFIG.");
             }
             catch (Exception ex)
             {
-                PluginLog.Error("[VIWIConfig] Failed to save config.");
+                pluginLog?.Error(ex, "[VIWI] Failed to save CONFIG.");
             }
         }
     }

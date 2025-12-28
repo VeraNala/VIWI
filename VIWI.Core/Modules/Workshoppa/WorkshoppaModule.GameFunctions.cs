@@ -14,6 +14,7 @@ using FFXIVClientStructs.FFXIV.Component.GUI;
 using InteropGenerator.Runtime;
 using VIWI.Helpers;
 using VIWI.Modules.Workshoppa.GameData;
+using static VIWI.Core.VIWIContext;
 
 namespace VIWI.Modules.Workshoppa;
 
@@ -21,7 +22,7 @@ internal sealed partial class WorkshoppaModule
 {
     private unsafe void InteractWithTarget(IGameObject obj)
     {
-        _pluginLog.Information($"Setting target to {obj}");
+        PluginLog.Information($"Setting target to {obj}");
         /*
         if (_targetManager.Target == null || _targetManager.Target != obj)
         {
@@ -34,10 +35,10 @@ internal sealed partial class WorkshoppaModule
 
     private float GetDistanceToEventObject(IReadOnlyList<uint> npcIds, out IGameObject? o)
     {
-        Vector3? localPlayerPosition = _clientState.LocalPlayer?.Position;
+        Vector3? localPlayerPosition = ClientState.LocalPlayer?.Position;
         if (localPlayerPosition != null)
         {
-            foreach (var obj in _objectTable)
+            foreach (var obj in ObjectTable)
             {
                 if (obj.ObjectKind == ObjectKind.EventObj)
                 {
@@ -59,7 +60,7 @@ internal sealed partial class WorkshoppaModule
 
     private unsafe AtkUnitBase* GetCompanyCraftingLogAddon()
     {
-        if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(_gameGui, "CompanyCraftRecipeNoteBook", out var addon) &&
+        if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "CompanyCraftRecipeNoteBook", out var addon) &&
             AddonState.IsAddonReady(addon))
             return addon;
 
@@ -89,53 +90,45 @@ internal sealed partial class WorkshoppaModule
 
     private unsafe bool SelectSelectString(string marker, int choice, Predicate<string> predicate)
     {
-        try
-        {
-            if (!AddonHelpers.TryGetAddonByName<AddonSelectString>(_gameGui, "SelectString", out var addonSelectString))
-                return false;
-            if (!AddonState.IsAddonReady(&addonSelectString->AtkUnitBase))
-                return false;
-
-            var popup = addonSelectString->PopupMenu;
-            var menu = popup.PopupMenu;
-
-            int entries = menu.EntryCount;
-            if (entries <= 0)
-                return false;
-
-            if (choice < 0 || choice >= entries)
-                return false;
-
-            var entryNames = menu.EntryNames;
-            if (entryNames == null)
-                return false;
-
-            CStringPointer textPointer = entryNames[choice];
-            if (!textPointer.HasValue)
-                return false;
-
-            var text = MemoryHelper.ReadSeStringNullTerminated(new nint(textPointer)).ToString();
-            if (string.IsNullOrEmpty(text))
-                return false;
-
-            _pluginLog.Verbose($"SelectSelectString({marker}): choice {choice}/{entries} '{text}'");
-
-            if (!predicate(text))
-                return false;
-
-            addonSelectString->AtkUnitBase.FireCallbackInt(choice);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _pluginLog.Warning(ex, $"SelectSelectString({marker}) failed safely");
+        if (!AddonHelpers.TryGetAddonByName<AddonSelectString>(GameGui, "SelectString", out var addonSelectString))
             return false;
-        }
+        if (!AddonState.IsAddonReady(&addonSelectString->AtkUnitBase))
+            return false;
+
+        var popup = addonSelectString->PopupMenu;
+        var menu = popup.PopupMenu;
+
+        int entries = menu.EntryCount;
+        if (entries <= 0)
+            return false;
+
+        if (choice < 0 || choice >= entries)
+            return false;
+
+        var entryNames = menu.EntryNames;
+        if (entryNames == null)
+            return false;
+
+        CStringPointer textPointer = entryNames[choice];
+        if (!textPointer.HasValue)
+            return false;
+
+        var text = MemoryHelper.ReadSeStringNullTerminated(new nint(textPointer)).ToString();
+        if (string.IsNullOrEmpty(text))
+            return false;
+
+        PluginLog.Verbose($"SelectSelectString({marker}): choice {choice}/{entries} '{text}'");
+
+        if (!predicate(text))
+            return false;
+
+        addonSelectString->AtkUnitBase.FireCallbackInt(choice);
+        return true;
     }
 
     private unsafe bool SelectSelectYesno(int choice, Predicate<string> predicate)
     {
-        if (AddonHelpers.TryGetAddonByName<AddonSelectYesno>(_gameGui, "SelectYesno", out var addonSelectYesno) &&
+        if (AddonHelpers.TryGetAddonByName<AddonSelectYesno>(GameGui, "SelectYesno", out var addonSelectYesno) &&
             AddonState.IsAddonReady(&addonSelectYesno->AtkUnitBase))
         {
             var text = MemoryHelper.ReadSeString(&addonSelectYesno->PromptText->NodeText).ToString();
@@ -144,13 +137,13 @@ internal sealed partial class WorkshoppaModule
                 .Replace("\r", "", StringComparison.Ordinal);
             if (predicate(text))
             {
-                _pluginLog.Information($"Selecting choice {choice} for '{text}'");
+                PluginLog.Information($"Selecting choice {choice} for '{text}'");
                 addonSelectYesno->AtkUnitBase.FireCallbackInt(choice);
                 return true;
             }
             else
             {
-                _pluginLog.Verbose($"Text {text} does not match");
+                PluginLog.Verbose($"Text {text} does not match");
             }
         }
 
@@ -197,7 +190,7 @@ internal sealed partial class WorkshoppaModule
         }
         catch (Exception e)
         {
-            _pluginLog.Warning(e, "Could not parse CompanyCraftMaterial info");
+            PluginLog.Warning(e, "Could not parse CompanyCraftMaterial info");
         }
 
         return null;
@@ -206,7 +199,7 @@ internal sealed partial class WorkshoppaModule
     private static uint ParseAtkItemCountHq(AtkValue atkValue)
     {
         // NQ / HQ string
-        // I have no clue, but it doesn't seme like the available HQ item count is strored anywhere in the atkvalues??
+        // I have no clue, but it doesn't seem like the available HQ item count is stored anywhere in the atkvalues??
         string? s = atkValue.ReadAtkString();
         if (s != null)
         {

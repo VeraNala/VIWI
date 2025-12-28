@@ -64,7 +64,7 @@ internal sealed unsafe class WorkshoppaRepairKitWindow : WorkshoppaShopWindowBas
         if (atkValues[0].UInt != 0)
             return;
 
-        uint itemCount = atkValues[2].UInt;
+        uint itemCount = atkValues[2].UInt; // 2 = Gil Text
         if (itemCount == 0)
             return;
 
@@ -138,12 +138,24 @@ internal sealed unsafe class WorkshoppaRepairKitWindow : WorkshoppaShopWindowBas
                         FontAwesomeIcon.DollarSign,
                         $"Auto-Buy missing Dark Matter for {cost:N0}{SeIconChar.Gil.ToIconString()}"))
                 {
-                    Shop.StartAutoPurchase(toPurchase);
-                    Shop.HandleNextPurchaseStep();
+                    ShopLogic();
                 }
             }
         }
         //DrawFollowControls();
+    }
+    public void ShopLogic()
+    {
+        int darkMatterClusters = GetDarkMatterClusterCount();
+        var item = Shop.ItemForSale.Value;
+        int missingItems = Math.Max(0, darkMatterClusters * 5 - (int)item.OwnedItems);
+        int toPurchase = Math.Min(Shop.GetMaxItemsToPurchase(), missingItems);
+        if (toPurchase > 0)
+        {
+            Shop.StartAutoPurchase(toPurchase);
+            Shop.HandleNextPurchaseStep();
+        }
+        
     }
 
     public override void TriggerPurchase(AtkUnitBase* addonShop, int buyNow)

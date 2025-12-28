@@ -7,15 +7,18 @@ using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game;
+using Lumina.Data.Parsing;
 using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Linq;
 using System.Numerics;
+using System.Security.Cryptography.Xml;
 using System.Text;
 using System.Text.RegularExpressions;
 using VIWI.Core;
 using VIWI.Modules.Workshoppa.GameData;
+using static VIWI.Modules.Workshoppa.WorkshoppaConfig;
 
 namespace VIWI.Modules.Workshoppa.Windows;
 
@@ -45,7 +48,7 @@ internal sealed class WorkshoppaWindow : Window
         IChatGui chatGui,
         RecipeTree recipeTree,
         IPluginLog pluginLog)
-        : base("Workshoppa###VIWI_WorkshoppaWindow")
+            : base("Workshoppa###VIWI_WorkshoppaWindow")
     {
         _module = module;
         _clientState = clientState;
@@ -75,8 +78,8 @@ internal sealed class WorkshoppaWindow : Window
     public bool NearFabricationStation { get; set; }
     public ButtonState State { get; set; } = ButtonState.None;
 
-    private bool IsDiscipleOfHand =>
-        _clientState.LocalPlayer != null && _clientState.LocalPlayer.ClassJob.RowId is >= 8 and <= 15;
+    private bool IsDiscipleOfHandOrLand =>
+        _clientState.LocalPlayer != null && _clientState.LocalPlayer.ClassJob.RowId is >= 8 and <= 18;
 
     public override void Draw()
     {
@@ -112,7 +115,7 @@ internal sealed class WorkshoppaWindow : Window
                     _checkInventory = !_checkInventory;
 
                 ImGui.SameLine();
-                ImGui.BeginDisabled(!NearFabricationStation || !IsDiscipleOfHand);
+                ImGui.BeginDisabled(!NearFabricationStation || !IsDiscipleOfHandOrLand);
 
                 if (currentItem.StartedCrafting)
                 {
@@ -166,14 +169,30 @@ internal sealed class WorkshoppaWindow : Window
 
             ImGui.SameLine();
             ImGui.BeginDisabled(!NearFabricationStation || _config.ItemQueue.Sum(x => x.Quantity) == 0 ||
-                                _module.CurrentStage != Stage.Stopped || !IsDiscipleOfHand);
+                                _module.CurrentStage != Stage.Stopped || !IsDiscipleOfHandOrLand);
 
             if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Play, "Start Crafting"))
             {
                 State = ButtonState.Start;
                 _checkInventory = false;
             }
-
+            ImGui.EndDisabled();
+            ImGui.BeginDisabled(!NearFabricationStation || _module.CurrentStage != Stage.Stopped || !IsDiscipleOfHandOrLand);
+            if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.LevelUpAlt, "Level MIN"))
+            {
+                StartLevelingConditions();
+            }
+            ImGuiComponents.HelpMarker("**Clicking this will clear your QUEUE!!**\n\n" +
+                "This is an experimental leveling feature that will repeatedly start and\n" +
+                "discontinue projects while turning in Mudstones to level MIN\n\n" +
+                "This only requires you to be at least level 20 MIN to start,\n" +
+                "and is a bit costly in later levels, but takes minimal time and effort.\n\n" +
+                "Some Common Breakpoints for Reference:\n" +
+                "Lvl 20 -> 60 - 23,017 Mudstone, (23 Stacks) - 713k\n" +
+                "Lvl 20 -> 70 - 66,061 Mudstone, (66 Stacks) - 2.04m\n" +
+                "Lvl 20 -> 80 - 148,924 Mudstone, (149 Stacks) - 4.61m\n" +
+                "Lvl 20 -> 90 - 329,422 Mudstone, (330 Stacks) - 10.2m\n" +
+                "Lvl 20 -> 100 - 668,303 Mudstone, (669 Stacks) - 20.7m") ;
             ImGui.EndDisabled();
             ShowErrorConditions();
         }
@@ -273,7 +292,7 @@ internal sealed class WorkshoppaWindow : Window
 
     private void Save()
     {
-        //_config.Save();
+        //Core.Save();
     }
 
     public void Toggle(EOpenReason reason)
@@ -565,8 +584,23 @@ internal sealed class WorkshoppaWindow : Window
         else if (!NearFabricationStation)
             ImGui.TextColored(ImGuiColors.DalamudRed, "You are not near a Fabrication Station.");
 
-        if (!IsDiscipleOfHand)
-            ImGui.TextColored(ImGuiColors.DalamudRed, "You need to be a Disciple of the Hand to start crafting.");
+        if (!IsDiscipleOfHandOrLand)
+            ImGui.TextColored(ImGuiColors.DalamudRed, "You need to be a Disciple of the Hand or Land to start crafting.");
+    }
+    public void StartLevelingConditions()
+    {
+        if (NearFabricationStation && _module.CurrentStage == Stage.Stopped && IsDiscipleOfHandOrLand)
+        {
+            _checkInventory = false;
+            _config.CurrentlyCraftedItem = null;
+            _config.ItemQueue.Clear();
+            _config.Mode = WorkshoppaConfig.TurnInMode.Leveling;
+            State = ButtonState.Start;
+        }
+        else
+        {
+            _chatGui.PrintError($"[Workshoppa] Leveling Failed - Are you on a DoH/oL Class and by a usable workshop?");
+        }
     }
 
     public enum ButtonState

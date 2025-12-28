@@ -1,50 +1,54 @@
-using ECommons.Logging;
 using VIWI.Core;
-using VIWI.Core.Config;
-using VIWI.Modules.AutoLogin;
+using static VIWI.Core.VIWIContext;
 
 namespace VIWI.Modules.AoEasy
 {
-    public sealed class AoEasyModule : IVIWIModule
+    public sealed class AoEasyModule : VIWIModuleBase<AoEasyConfig>
     {
         public const string ModuleName = "AoEasy";
-        public const string ModuleVersion = "1.0.0";
+        public const string ModuleVersion = "0.0.1";
+        public override string Name => ModuleName;
+        public override string Version => ModuleVersion;
+        public AoEasyConfig _configuration => ModuleConfig;
+        private VIWIConfig Core => CoreConfig;
+        internal static AoEasyModule? Instance { get; private set; }
+        public static bool Enabled => Instance?._configuration.Enabled ?? false;
 
-        public string Name => ModuleName;
-        public string Version => ModuleVersion;
+        protected override AoEasyConfig CreateConfig() => new AoEasyConfig();
+        protected override AoEasyConfig GetConfigBranch(VIWIConfig core) => core.AoEasy;
+        protected override void SetConfigBranch(VIWIConfig core, AoEasyConfig _configuration) => core.AoEasy = _configuration;
+        protected override bool GetEnabled(AoEasyConfig _configuration) => _configuration.Enabled;
+        protected override void SetEnabledValue(AoEasyConfig _configuration, bool enabled) => _configuration.Enabled = enabled;
+        public void SaveConfig() => Core.Save();
 
-        private VIWIConfig vConfig = null!;
-        public static AoEasyConfig _configuration = null!;
-        public static bool Enabled => _configuration?.Enabled ?? false;
-
-        public void Initialize(VIWIConfig config)
+        // ----------------------------
+        // Module Base
+        // ----------------------------
+        public override void Initialize(VIWIConfig config)
         {
-            PluginLog.Information("[VIWI.AoEasy] Initializing...");
+            Instance = this;
+            base.Initialize(config);
 
-            LoadConfig();
-            JobData.InitializeJobs();
-            JobData.InitializeAbilities();
+            if (_configuration.Enabled)
+                Enable();
+        }
+        public override void Enable()
+        {   
+        }
+        public override void Disable()
+        {
+        }
+        public override void Dispose()
+        {
+            Disable();
 
-            PluginLog.Information("[VIWI.AoEasy] Initialized successfully.");
+            if (Instance == this)
+                Instance = null;
+            PluginLog.Information("[AoEasy] Disposed.");
         }
 
-        public void Dispose()
-        {
-            PluginLog.Information("[VIWI.AoEasy] Disposed.");
-        }
 
-        public static void LoadConfig()
-        {
-            /*_configuration = VIWIContext.PluginInterface.GetPluginConfig() as AoEasyConfig
-                     ?? new AoEasyConfig();
 
-            SaveConfig();*/
-        }
-
-        public static void SaveConfig()
-        {
-            //_configuration.Save();
-        }
         public void Update()
         {
             var player = VIWIContext.PlayerState;

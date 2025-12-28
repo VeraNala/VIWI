@@ -1,35 +1,63 @@
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
+using System;
+using System.Linq;
 
 namespace VIWI.Helpers;
 
 internal static unsafe class AddonHelpers
 {
-    public static bool TryGetAddonByName<T>(IGameGui gameGui, string name, out T* addon)
+    public static bool TryGetAddonByName<T>(IGameGui gameGui, string addonName, out T* addonPtr)
         where T : unmanaged
     {
-        var ptr = gameGui.GetAddonByName(name);
-        addon = (T*)(nint)ptr;
-        return ptr != nint.Zero;
+        ArgumentNullException.ThrowIfNull(gameGui);
+        ArgumentException.ThrowIfNullOrEmpty(addonName);
+
+        var ptr = gameGui.GetAddonByName(addonName);
+        if (!ptr.IsNull)
+        {
+            addonPtr = (T*)ptr.Address;
+            return true;
+        }
+        else
+        {
+            addonPtr = null;
+            return false;
+        }
     }
 }
 internal static unsafe class AddonState
 {
-    public static AtkUnitBase* GetAddonById(ushort addonId)
+    private const int UnitListCount = 18;
+    public static unsafe AtkUnitBase* GetAddonById(uint id)
     {
-        if (addonId == 0) return null;
-        return RaptureAtkUnitManager.Instance()->GetAddonById(addonId);
-    }
+        var unitManagers = &AtkStage.Instance()->RaptureAtkUnitManager->AtkUnitManager.DepthLayerOneList;
+        for (var i = 0; i < UnitListCount; i++)
+        {
+            var unitManager = &unitManagers[i];
+            foreach (var j in Enumerable.Range(0, Math.Min(unitManager->Count, unitManager->Entries.Length)))
+            {
+                var unitBase = unitManager->Entries[j].Value;
+                if (unitBase != null && unitBase->Id == id)
+                {
+                    return unitBase;
+                }
+            }
+        }
 
-    public static bool IsAddonReady(AtkUnitBase* addon)
+        return null;
+    }
+    public static unsafe bool IsAddonReady(AtkUnitBase* addon)
     {
         if (addon == null) return false;
 
+        if (!addon->IsVisible) return false;
+
+        if (addon->UldManager.LoadedState != AtkLoadState.Loaded) return false;
+
         if (addon->UldManager.NodeList == null) return false;
         if (addon->UldManager.NodeListCount == 0) return false;
-        //if (addon->AtkValues != null) return false;
-        //if (addon->AtkValuesCount == 0) return false;
 
         return true;
     }

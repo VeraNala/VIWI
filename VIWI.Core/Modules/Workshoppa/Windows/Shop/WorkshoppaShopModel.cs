@@ -5,7 +5,7 @@ namespace VIWI.Modules.Workshoppa.Windows.Shop;
 internal readonly record struct ShopItemForSale
 {
     public int Position { get; init; }
-    public string ItemName { get; init; }
+    public string? ItemName { get; init; }
     public uint Price { get; init; }
     public uint OwnedItems { get; init; }
     public uint ItemId { get; init; }

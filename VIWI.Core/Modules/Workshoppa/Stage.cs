@@ -19,7 +19,9 @@ public enum Stage
     ConfirmMaterialDelivery,
 
     ConfirmCollectProduct,
+    CloseDeliveryMenu,
+    DiscontinueProject,
 
     RequestStop,
-    Stopped,
+    Stopped,  
 }

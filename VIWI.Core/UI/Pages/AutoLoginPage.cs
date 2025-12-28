@@ -30,7 +30,8 @@ namespace VIWI.UI.Pages
 
         public void Draw()
         {
-            var config = AutoLoginModule._configuration;
+            var module = AutoLoginModule.Instance;
+            var config = module?._configuration;
             if (config == null)
             {
                 ImGui.TextDisabled("AutoLogin is not initialized yet.");
@@ -129,6 +130,7 @@ namespace VIWI.UI.Pages
 
             if (VIWIPlugin.DEVMODE)
             {
+#pragma warning disable CS0162 // Unreachable code detected
                 float toggleWidth = 60f;
                 uint colBase = debugEnabled ? 0xFF27AE60u : 0xFF7F8C8Du;
                 uint colHovered = debugEnabled ? 0xFF2ECC71u : 0xFF95A5A6u;
@@ -157,6 +159,7 @@ namespace VIWI.UI.Pages
                 }
                 ImGui.PopStyleColor(3);
                 ImGui.PopStyleVar(2);
+#pragma warning restore CS0162 // Unreachable code detected
             }
         }
     }

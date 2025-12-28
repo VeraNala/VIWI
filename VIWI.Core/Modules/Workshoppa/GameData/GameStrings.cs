@@ -1,10 +1,13 @@
-using System.Data;
-using System.Diagnostics.CodeAnalysis;
-using System.Text.RegularExpressions;
 using Dalamud.Plugin.Services;
+using ECommons.Automation;
 using Lumina.Excel;
 using Lumina.Excel.Sheets;
 using Lumina.Text.ReadOnly;
+using System;
+using System.Data;
+using System.Diagnostics.CodeAnalysis;
+using System.Text.RegularExpressions;
+using TerraFX.Interop.Windows;
 using VIWI.Helpers;
 
 namespace VIWI.Modules.Workshoppa.GameData;
@@ -27,6 +30,8 @@ internal sealed class GameStrings
         RetrieveFinishedItem =
             dataManager.GetRegex<WorkshopDialogue>("TEXT_CMNDEFCOMPANYMANUFACTORY_00150_FINISH_CONF", pluginLog)
             ?? throw new ConstraintException($"Unable to resolve {nameof(RetrieveFinishedItem)}");
+        DiscontinueItem = dataManager.GetRegex<WorkshopDialogue>("TEXT_CMNDEFCOMPANYMANUFACTORY_00150_SUBMENU_CC_BREAK_ALL_CONF", pluginLog)
+            ?? throw new ConstraintException($"Unable to resolve {nameof(DiscontinueItem)}");
     }
 
     public Regex PurchaseItemForGil { get; }
@@ -35,6 +40,7 @@ internal sealed class GameStrings
     public string TurnInHighQualityItem { get; }
     public Regex ContributeItems { get; }
     public Regex RetrieveFinishedItem { get; }
+    public Regex DiscontinueItem { get; }
 
     [Sheet("custom/001/CmnDefCompanyManufactory_00150")]
     [SuppressMessage("Performance", "CA1812")]
@@ -52,4 +58,22 @@ internal sealed class GameStrings
             uint row) =>
             new(page, offset, row);
     }
+    /*
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_MENU_TITLE => What would you like to do?
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_MENU_CC_NOTE => View company crafting log.
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_MENU_CC_SUPPLY => Contribute materials. (Quality: /100)
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_MENU_CC_BREAK => Discontinue project.
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_MENU_CC_GET_ITEM => Collect finished product.
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_MENU_CC_PROGRESS => Advance to the next phase of production. (Quality: /100)
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_MENU_CC_LAST_PROGRESS => Complete the construction of. (Quality: /100)
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_MENU_EXIT => Nothing.
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_SUBMENU_CC_BREAK_ALL_CONF => Are you certain you wish to discontinue the construction of ?
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_SUBMENU_CC_BREAK_ALL_CHECK => Discontinue project.
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_SUBMENU_CC_BREAK_YES => Yes
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_SUBMENU_CC_BREAK_NO => No
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_FINISH_CONF => Retrieve from the company workshop?
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_FINISH_YES => Yes
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_FINISH_NO => No
+        TEXT_CMNDEFCOMPANYMANUFACTORY_00150_NULL => */
 }
+

@@ -49,7 +49,6 @@ internal abstract unsafe class WorkshoppaShopWindowBase : Window, IDisposable
         get => followAddon;
         set => followAddon = value;
     }
-    private bool _userMoved;
     public void EnableShopListeners() => Shop.Enable();
     public void DisableShopListeners() => Shop.Disable();
     public void Dispose() => Shop.Dispose();
@@ -79,7 +78,6 @@ internal abstract unsafe class WorkshoppaShopWindowBase : Window, IDisposable
             if (ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows) &&
                 ImGui.IsMouseDragging(ImGuiMouseButton.Left))
             {
-                _userMoved = true;
                 FollowAddon = false;
             }
         }

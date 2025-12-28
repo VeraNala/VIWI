@@ -1,20 +1,32 @@
+using Dalamud.Game.Text.SeStringHandling;
+using Dalamud.Memory;
 using FFXIVClientStructs.FFXIV.Component.GUI;
-using AtkValueType = FFXIVClientStructs.FFXIV.Component.GUI.ValueType;
+using Lumina.Text.ReadOnly;
 
 namespace VIWI.Helpers;
 
+
 internal static unsafe class AtkValueExtensions
 {
-    public static string ReadAtkString(this AtkValue atkValue)
+    public static unsafe string? ReadAtkString(this AtkValue atkValue)
     {
-        // String types are 0x03 (managed string) or 0x08 (Utf8String*)
-        if (atkValue.Type != AtkValueType.String && atkValue.Type != AtkValueType.ManagedString)
+        if (atkValue.Type == ValueType.Undefined)
+            return null;
+        if (atkValue.String.HasValue)
+            return MemoryHelper.ReadSeStringNullTerminated(new nint(atkValue.String)).WithCertainMacroCodeReplacements();
+        return null;
+    }
+}
+
+public static class SeStringExtensions
+{
+    public static string WithCertainMacroCodeReplacements(this SeString? str)
+    {
+        if (str == null)
             return string.Empty;
 
-        var strPtr = atkValue.String;
-        if (strPtr == null)
-            return string.Empty;
-
-        return atkValue.String.ToString();
+        // dalamud doesn't have all payload types that Lumina's SeString has, so we don't even know if certain payloads are e.g. soft hyphens
+        var seString = new ReadOnlySeString(str.Encode());
+        return seString.WithCertainMacroCodeReplacements();
     }
 }

@@ -1,4 +1,3 @@
-using Dalamud.Configuration;
 using System;
 
 namespace VIWI.Modules.AutoLogin
