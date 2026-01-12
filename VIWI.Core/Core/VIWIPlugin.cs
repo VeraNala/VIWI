@@ -58,6 +58,7 @@ public sealed class VIWIPlugin : IDalamudPlugin
         config.Initialize(PluginInterface);
 
         VIWIContext.CorePlugin = this;
+        VIWIContext.CoreConfig = config;
         VIWIContext.PluginInterface = pluginInterface;
         VIWIContext.PluginLog = pluginLog;
         VIWIContext.ClientState = clientState;

@@ -36,9 +36,15 @@ namespace VIWI.Modules.AutoLogin
         public string HCvDataCenterName { get; set; } = "";
 
         public int DCsRecovered { get; set; } = 0;
+        public int AuthsRecovered { get; set; } = 0;
 
         public bool RunLoginCommands = false;
         public bool ARActiveSkipLoginCommands = true;
-        public List<string> LoginCommands = new();
+        public List<string> LoginCommands = [];
+
+        public string ClientLaunchPath { get; set; } = string.Empty;
+        public string ClientLaunchArgs { get; set; } = string.Empty;
+        public bool RestartingClient { get; set; } = false;
+
     }
 }

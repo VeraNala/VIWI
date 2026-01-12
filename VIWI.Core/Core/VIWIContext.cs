@@ -7,6 +7,7 @@ namespace VIWI.Core;
 public static class VIWIContext
 {
     public static VIWIPlugin CorePlugin { get; internal set; } = null!;
+    public static VIWIConfig CoreConfig { get; set; } = null!;
     public static IDalamudPluginInterface PluginInterface { get; internal set; } = null!;
     public static IClientState ClientState { get; internal set; } = null!;
     public static IPlayerState PlayerState { get; internal set; } = null!;

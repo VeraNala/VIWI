@@ -13,6 +13,8 @@ using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using Lumina.Excel.Sheets;
 using System;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using VIWI.Core;
@@ -25,7 +27,7 @@ namespace VIWI.Modules.AutoLogin
     internal unsafe class AutoLoginModule : VIWIModuleBase<AutoLoginConfig>
     {
         public const string ModuleName = "AutoLogin";
-        public const string ModuleVersion = "1.0.6";
+        public const string ModuleVersion = "1.1.0";
         public override string Name => ModuleName;
         public override string Version => ModuleVersion;
         public AutoLoginConfig _configuration => ModuleConfig;
@@ -53,10 +55,12 @@ namespace VIWI.Modules.AutoLogin
         private Hook<LobbyErrorHandlerDelegate>? LobbyErrorHandlerHook;
         private bool noKillHookInitialized;
 
+        private DateTime _lastRestartRequest = DateTime.MinValue;
         private DateTime _lastErrorEpisode = DateTime.MinValue;
         private bool _inErrorRecovery = false;
         private bool _disconnected;
         private bool _pendingLoginCommands;
+
 
         // ----------------------------
         // Module Base
@@ -74,6 +78,10 @@ namespace VIWI.Modules.AutoLogin
         {
             NoKill();
 
+            if (CoreConfig.Unlocked)
+            {
+                CheckRestartFlag();
+            }
             UpdateConfig();
             Framework.Update += OnFrameworkUpdate;
             ClientState.Login += OnLogin;
@@ -340,6 +348,10 @@ namespace VIWI.Modules.AutoLogin
                 if (v4_16 == 0x332C && _configuration.SkipAuthError)
                 {
                     PluginLog.Debug($"Skip Auth Error");
+                    if (CoreConfig.Unlocked && _configuration.SkipAuthError == true && _configuration.ClientLaunchPath != null)
+                    {
+                        RequestClientRestart();
+                    }
                 }
                 else
                 {
@@ -654,6 +666,68 @@ namespace VIWI.Modules.AutoLogin
         public void TestLoginCommandsNow()
         {
             RunLoginCommands();
+        }
+        #endregion
+        #region Step 5 - Restart on Auth Error
+        public void RequestClientRestart()
+        {
+            if (string.IsNullOrWhiteSpace(ModuleConfig.ClientLaunchPath))
+            {
+                PluginLog.Warning("[AutoLogin] ClientLaunchPath is not configured; cannot restart client.");
+                return;
+            }
+
+            if ((DateTime.Now - _lastRestartRequest).TotalSeconds < 5)
+                return;
+
+            _lastRestartRequest = DateTime.Now;
+            ModuleConfig.RestartingClient = true;
+            SaveConfig();
+
+            try
+            {
+                var launchPath = ModuleConfig.ClientLaunchPath;
+                var launchArgs = ModuleConfig.ClientLaunchArgs ?? string.Empty;
+                if (!launchPath.Contains("://", StringComparison.OrdinalIgnoreCase) && !File.Exists(launchPath))
+                {
+                    PluginLog.Warning($"[AutoLogin] Launch target does not exist: {launchPath}. Clearing restart flag.");
+                    ClearRestartFlag();
+                    return;
+                }
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = launchPath,
+                    Arguments = launchArgs,
+                    UseShellExecute = true,
+                };
+
+                Process.Start(psi);
+
+                PluginLog.Information($"[AutoLogin] Restart requested. Launched: {launchPath} {launchArgs}");
+            }
+            catch (Exception ex)
+            {
+                PluginLog.Error(ex, "[AutoLogin] Failed launching new client. Clearing restart flag.");
+                ClearRestartFlag();
+                return;
+            }
+            CommandManager.ProcessCommand("/shutdown");
+        }
+        private void CheckRestartFlag()
+        {
+            if (!ModuleConfig.RestartingClient)
+                return;
+
+            PluginLog.Information($"[AutoLogin] Detected RestartingClient flag.");
+            StartAutoLogin();
+            ModuleConfig.AuthsRecovered++;
+            ClearRestartFlag();
+        }
+        private void ClearRestartFlag()
+        {
+            ModuleConfig.RestartingClient = false;
+            SaveConfig();
         }
         #endregion
     }

@@ -15,7 +15,7 @@ namespace VIWI.Core
         public int Version { get; set; } = 1;
         public IPluginLog? pluginLog;
         public const bool DEVMODE = false;
-        public bool FeaturesUnlocked = false;
+        public bool Unlocked { get; set; } = false;
 
         public AoEasyConfig AoEasy { get; set; } = new();
         public AutoLoginConfig AutoLogin { get; set; } = new();

@@ -2,10 +2,10 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Components;
 using Dalamud.Interface.Utility;
-using ECommons.Configuration;
 using ECommons.ImGuiMethods;
 using ECommons.Logging;
 using System.Numerics;
+using TerraFX.Interop.Windows;
 using VIWI.Core;
 using VIWI.Helpers;
 using VIWI.Modules.AutoLogin;
@@ -23,6 +23,9 @@ namespace VIWI.UI.Pages
 
         public bool debugEnabled = false;
         private string _newLoginCmd = string.Empty;
+        private string _launchPathBuf = "";
+        private string _launchArgsBuf = "";
+        private bool _buffersInitialized = false;
 
         public void Draw()
         {
@@ -120,15 +123,56 @@ namespace VIWI.UI.Pages
 
             ImGuiHelpers.ScaledDummy(2f);
 
-            bool skipAuth = config.SkipAuthError;
-
-            if (ImGui.Checkbox("Skip Auth", ref skipAuth))
+            if (VIWIContext.CoreConfig != null && VIWIContext.CoreConfig.Unlocked)
             {
-                config.SkipAuthError = skipAuth;
-                module?.SaveConfig();
-            }
-            ImGuiComponents.HelpMarker("Experimental: Will attempt to bypass Auth Errors.... I think?");
+                bool skipAuth = config.SkipAuthError;
 
+                if (ImGui.Checkbox("Restart on Auth Error", ref skipAuth))
+                {
+                    config.SkipAuthError = skipAuth;
+                    module?.SaveConfig();
+                }
+                ImGui.SameLine();
+                ImGuiComponents.HelpMarker("Experimental: Will attempt to restart your client in the event of an Auth Error." +
+                    "\nSome notes on this:" +
+                    "\nIf you have an OTP on your account you will need to use the XIV Auth App" +
+                    "\nIf you do not enable \"Log in automatically\" in XIVLauncher this will not work." +
+                    "\nIf you do not set up commands or AR Multi on launch, this will only log you back into your last character, nothing else." +
+                    "\nYou are using this feature entirely at your own risk - It is literally accessing files on your PC to open clients.");
+                var cfg = config;
+                if (!_buffersInitialized)
+                {
+                    _launchPathBuf = cfg.ClientLaunchPath ?? "";
+                    _launchArgsBuf = cfg.ClientLaunchArgs ?? "";
+                    _buffersInitialized = true;
+                }
+                ImGui.Text("Launch Path:");
+                ImGui.SetNextItemWidth(-1);
+                var path = ImGui.InputTextWithHint("##client_launch_path", "example: C:\\Program Files (x86)\\XIVLauncher\\XIVLauncher.exe", ref _launchPathBuf, 512, ImGuiInputTextFlags.EnterReturnsTrue);
+                if (ImGui.IsItemDeactivatedAfterEdit())
+                {
+                    cfg.ClientLaunchPath = _launchPathBuf;
+                    module?.SaveConfig();
+                }
+                ImGui.Text("Launch Arguments:");
+                ImGui.SetNextItemWidth(-1);
+                var args = ImGui.InputTextWithHint("##client_launch_args", "example: --roamingPath=\"%appdata%\\XIVLauncher\" --account=yoship-False-False", ref _launchArgsBuf, 512, ImGuiInputTextFlags.EnterReturnsTrue);
+                if (ImGui.IsItemDeactivatedAfterEdit())
+                {
+                    cfg.ClientLaunchArgs = _launchArgsBuf;
+                    module?.SaveConfig();
+                }
+            }
+            else
+            {
+                bool skipAuth = config.SkipAuthError;
+
+                if (ImGui.Checkbox("Skip Close on Auth Error", ref skipAuth))
+                {
+                    config.SkipAuthError = skipAuth;
+                    module?.SaveConfig();
+                }
+            }
             ImGuiHelpers.ScaledDummy(8f);
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(8f);
@@ -268,6 +312,10 @@ namespace VIWI.UI.Pages
             }
             else
                 ImGui.TextColored(GradientColor.Get(ImGuiHelper.RainbowColorStart, ImGuiHelper.RainbowColorEnd, 500), "YOSHIP SAVE US!! PLEASE WE'RE BEGGING YOU!!");
+            if (VIWIContext.CoreConfig != null && VIWIContext.CoreConfig.Unlocked)
+            {
+                ImGui.TextUnformatted($"VIWI has helped you recover from: {config.AuthsRecovered} Authentication Errors");
+            }
 
             if (VIWIConfig.DEVMODE)
             {
@@ -289,7 +337,7 @@ namespace VIWI.UI.Pages
 
                     if (module != null && debugEnabled == true)
                     {
-                        module?.TestLoginCommandsNow();
+                        module?.RequestClientRestart();
                         PluginLog.Information("Testing Login Commands");
                     }
                 }

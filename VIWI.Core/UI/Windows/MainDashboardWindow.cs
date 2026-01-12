@@ -244,7 +244,7 @@ namespace VIWI.UI.Windows
                 {
                     _passkeyStatus = "Unlocked!";
                     _passkeyStatusColor = new Vector4(0.3f, 1f, 0.3f, 1f);
-                    _config.FeaturesUnlocked = true;
+                    _config.Unlocked = true;
                     _config.Save();
                 }
                 else
