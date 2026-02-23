@@ -16,6 +16,7 @@ internal sealed unsafe class RegularShopController : IDisposable
     private readonly IPluginLog _log;
     private readonly IGameGui _gameGui;
     private readonly IAddonLifecycle _addonLifecycle;
+    private DateTime _lastPurchaseAttempt = DateTime.MinValue;
 
     public RegularShopController(
         WorkshoppaShopWindowBase parent,
@@ -34,6 +35,8 @@ internal sealed unsafe class RegularShopController : IDisposable
     public ShopItemForSale? ItemForSale { get; set; }
     public ShopPurchaseState? PurchaseState { get; private set; }
     public bool AutoBuyEnabled => PurchaseState != null;
+    public uint? PurchaseItemId { get; private set; }
+    private bool _closeShopRequested;
 
     public bool IsAwaitingYesNo
     {
@@ -104,17 +107,32 @@ internal sealed unsafe class RegularShopController : IDisposable
         {
             _parent.IsOpen = false;
         }
+        if (AddonHelpers.TryGetAddonByName(_gameGui, _addonName, out AtkUnitBase* addonShop) && AddonState.IsAddonReady(addonShop) && _closeShopRequested)
+        {
+            _log.Information("[Workshoppa] Closing Shop window after completed purchase.");
+            addonShop->FireCallbackInt(-1);
+            _closeShopRequested = false;
+        }
     }
 
     private void PostUpdateShopStock()
     {
-        if (ItemForSale != null && PurchaseState != null)
+        if (PurchaseState == null)
+            return;
+
+        // While purchasing, update owned count from whichever row corresponds to the item being purchased
+        if (PurchaseItemId != null)
         {
-            int ownedItems = (int)ItemForSale.Value.OwnedItems;
-            if (PurchaseState.OwnedItems != ownedItems)
+            var pid = PurchaseItemId.Value;
+
+            if (ItemForSale != null && ItemForSale.Value.ItemId == pid)
             {
-                PurchaseState.OwnedItems = ownedItems;
-                PurchaseState.NextStep = DateTime.Now.AddSeconds(0.25);
+                int ownedItems = (int)ItemForSale.Value.OwnedItems;
+                if (PurchaseState.OwnedItems != ownedItems)
+                {
+                    PurchaseState.OwnedItems = ownedItems;
+                    PurchaseState.NextStep = DateTime.Now.AddSeconds(0.25);
+                }
             }
         }
     }
@@ -135,19 +153,34 @@ internal sealed unsafe class RegularShopController : IDisposable
     public void CancelAutoPurchase()
     {
         PurchaseState = null;
+        PurchaseItemId = null;
         _parent.RestoreExternalPluginState();
     }
 
     public void StartAutoPurchase(int toPurchase)
     {
         if (ItemForSale == null) return;
-        PurchaseState = new ShopPurchaseState((int)ItemForSale.Value.OwnedItems + toPurchase, (int)ItemForSale.Value.OwnedItems);
+
+        PurchaseItemId = ItemForSale.Value.ItemId;
+
+        PurchaseState = new ShopPurchaseState(
+            (int)ItemForSale.Value.OwnedItems + toPurchase,
+            (int)ItemForSale.Value.OwnedItems);
+
         _parent.SaveExternalPluginState();
     }
 
     public void HandleNextPurchaseStep()
     {
         if (ItemForSale == null || PurchaseState == null) return;
+        if (PurchaseState.IsAwaitingYesNo && _lastPurchaseAttempt != DateTime.MinValue && DateTime.Now - _lastPurchaseAttempt > TimeSpan.FromSeconds(3))
+        {
+            _log.Warning("[Shop] Purchase step timed out. Retrying.");
+
+            PurchaseState.IsAwaitingYesNo = false;
+            PurchaseState.NextStep = DateTime.Now;
+            _lastPurchaseAttempt = DateTime.MinValue;
+        }
 
         int maxStackSize = DetermineMaxStackSize(ItemForSale.Value.ItemId);
         if (maxStackSize == 0 && !HasFreeInventorySlot())
@@ -160,24 +193,29 @@ internal sealed unsafe class RegularShopController : IDisposable
 
         if (!PurchaseState.IsComplete)
         {
-            if (PurchaseState.NextStep <= DateTime.Now &&
-                AddonHelpers.TryGetAddonByName(_gameGui, _addonName, out AtkUnitBase* addonShop))
+            if (PurchaseState.NextStep <= DateTime.Now && AddonHelpers.TryGetAddonByName(_gameGui, _addonName, out AtkUnitBase* addonShop))
             {
                 int buyNow = Math.Min(PurchaseState.ItemsLeftToBuy, maxStackSize);
                 _log.Information($"Buying {buyNow}x {ItemForSale.Value.ItemName}");
-
                 _parent.TriggerPurchase(addonShop, buyNow);
-
                 PurchaseState.NextStep = DateTime.MaxValue;
                 PurchaseState.IsAwaitingYesNo = true;
+                _lastPurchaseAttempt = DateTime.Now;
             }
-
             return;
         }
+        _closeShopRequested = true;
 
-        _log.Information($"Stopping item purchase (desired = {PurchaseState.DesiredItems}, owned = {PurchaseState.OwnedItems})");
+        uint itemId = ItemForSale.Value.ItemId;
+        int desired = PurchaseState.DesiredItems;
+        int owned = PurchaseState.OwnedItems;
+
+        _log.Information($"Stopping item purchase (desired = {desired}, owned = {owned})");
         PurchaseState = null;
         _parent.RestoreExternalPluginState();
+
+        _parent.NotifyAutoBuyCompleted(itemId, desired, owned);
+        return;
     }
 
     public bool HasFreeInventorySlot() => CountFreeInventorySlots() > 0;
@@ -251,6 +289,29 @@ internal sealed unsafe class RegularShopController : IDisposable
         }
         return Math.Min(99, max);
     }
+    public int SumFreeSpaceInPartials(uint itemId, int maxStack = 999)
+    {
+        var inv = InventoryManager.Instance();
+        if (inv == null) return 0;
+
+        int space = 0;
+        for (InventoryType t = InventoryType.Inventory1; t <= InventoryType.Inventory4; ++t)
+        {
+            var container = inv->GetInventoryContainer(t);
+            for (int i = 0; i < container->Size; ++i)
+            {
+                var it = container->GetInventorySlot(i);
+                if (it == null || it->ItemId == 0) continue;
+                if (it->ItemId != itemId) continue;
+
+                int qty = it->Quantity;
+                if (qty > 0 && qty < maxStack)
+                    space += (maxStack - qty);
+            }
+        }
+        return space;
+    }
+
     private bool _enabled;
 
     public void Enable()

@@ -16,29 +16,25 @@ public static class ExpCalc
         return (uint)Math.Max(0, row.Value.ExpToNext);
     }
 
-    public static long GetExpRemainingToLevel(
-       IDataManager dataManager,
-       IPlayerState playerState,
-       int currentLevel,
-       int targetLevel)
+    // Remaining EXP to reach targetLevel for a specific job
+    public static int GetExpRemainingToLevel(IDataManager dataManager, IPlayerState playerState, ClassJob job, int targetLevel)
     {
+        int currentLevel = playerState.GetClassJobLevel(job);
         if (targetLevel <= currentLevel)
             return 0;
 
         long total = 0;
 
-        // EXP already earned in the current level
-        long currentExpInLevel =
-            playerState.GetClassJobExperience(playerState.ClassJob.Value);
+        long currentExpInLevel = playerState.GetClassJobExperience(job);
 
-        // Remaining EXP to next level
         uint toNext = GetExpToNextLevel(dataManager, currentLevel);
-        total += Math.Max(0, toNext - currentExpInLevel);
+        total += Math.Max(0, (long)toNext - currentExpInLevel);
 
-        // Full levels in between
         for (int lv = currentLevel + 1; lv < targetLevel; lv++)
             total += GetExpToNextLevel(dataManager, lv);
 
-        return total;
+        if (total <= 0) return 0;
+        if (total > int.MaxValue) return int.MaxValue;
+        return (int)total;
     }
 }

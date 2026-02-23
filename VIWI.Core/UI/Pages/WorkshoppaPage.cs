@@ -1,8 +1,14 @@
 using Dalamud.Bindings.ImGui;
+using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Interface.Components;
 using Dalamud.Interface.Utility;
+using Dalamud.Interface.Utility.Raii;
+using Dalamud.Plugin.Services;
 using ECommons.ImGuiMethods;
+using Lumina.Excel.Sheets;
+using System;
 using System.Numerics;
+using VIWI.Core;
 using VIWI.Helpers;
 using VIWI.Modules.Workshoppa;
 
@@ -14,7 +20,6 @@ namespace VIWI.UI.Pages
         public string Category => "Modules";
         public string Version => WorkshoppaModule.ModuleVersion;
         public bool SupportsEnableToggle => true;
-
         public bool IsEnabled
         {
             get => WorkshoppaModule.Enabled;
@@ -82,21 +87,141 @@ namespace VIWI.UI.Pages
             ImGuiComponents.HelpMarker("Feature to Automatically purchase CerueleumFuelTanks from *FC MAMMET & RESIDENT CARETAKER* vendors. \n" +
                 "Just input how many stacks of fuel you would like to buy in the respective window.");
 
-            bool enableMudstone = config.EnableMudstoneCalculator;
+            bool enableMudstone = config.EnableGrindstoneShopCalculator;
             if (ImGui.Checkbox("Enable Mudstone Calculator", ref enableMudstone))
             {
-                config.EnableMudstoneCalculator = enableMudstone;
+                config.EnableGrindstoneShopCalculator = enableMudstone;
                 WorkshoppaModule.Instance?.SaveConfig();
             }
             ImGuiComponents.HelpMarker("Feature to Automatically purchase Mudstone from *(RESIDENTIAL DISTRICT) MATERIAL SUPPLIER* vendors. \n" +
                 "Just input how many stacks of mudstones you would like to buy in the respective window.");
 
+            ImGuiHelpers.ScaledDummy(8f);
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(8f);
-            ImGui.TextUnformatted("Commands:"); //I could have made a table but I'm tired.
+
+            ImGui.TextUnformatted("Grindstone Level Targets");
+            ImGui.SameLine();
+            ImGuiComponents.HelpMarker("Set your Target level and ensure you have enough materials to reach it!!");
+
+            var dm = VIWIContext.DataManager;
+            var ps = VIWIContext.PlayerState;
+
+            var localPlayer = VIWIContext.ObjectTable.LocalPlayer;
+            bool hasPreferredWorldBonus = localPlayer != null && WorkshoppaHelpers.HasStatus(localPlayer, WorkshoppaHelpers.PreferredWorldBonusStatusId);
+
+            var crp = WorkshoppaHelpers.GetJobByAbbrev(dm, "CRP");
+            var min = WorkshoppaHelpers.GetJobByAbbrev(dm, "MIN");
+            var btn = WorkshoppaHelpers.GetJobByAbbrev(dm, "BTN");
+
+            // Elm Lumber: 747 EXP each, turn-in size 55 => always multiple of 55
+            var (crpQtyText, crpEligible, crpStatusText) = WorkshoppaHelpers.ComputeRow(dm, ps, crp, config.CrpTargetLevel, hasPreferredWorldBonus, minRequiredLevel: 16, expPerMaterial: 747, materialsPerTurnin: 55);
+            // Mudstone: 498 EXP each, turn-in size 55 => always multiple of 55
+            var (minQtyText, minEligible, minStatusText) = WorkshoppaHelpers.ComputeRow(dm, ps, min, config.MinTargetLevel, hasPreferredWorldBonus, minRequiredLevel: 20, expPerMaterial: 498, materialsPerTurnin: 55);
+            // Spruce Log: 2334 EXP each, turn-in size 55 => always multiple of 55
+            var (btnQtyText, btnEligible, btnStatusText) = WorkshoppaHelpers.ComputeRow(dm, ps, btn, config.BtnTargetLevel, hasPreferredWorldBonus, minRequiredLevel: 50, expPerMaterial: 2334, materialsPerTurnin: 55);
+
+            if (ImGui.BeginTable("WorkshoppaLevelTargets", 6, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg))
+            {
+                ImGui.TableSetupColumn("Enable", ImGuiTableColumnFlags.WidthFixed);
+                ImGui.TableSetupColumn("Job", ImGuiTableColumnFlags.WidthFixed);
+                ImGui.TableSetupColumn("Current Lvl", ImGuiTableColumnFlags.WidthFixed);
+                ImGui.TableSetupColumn("Target Lvl", ImGuiTableColumnFlags.WidthFixed);
+                ImGui.TableSetupColumn("Required Material", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableSetupColumn("Quantity", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.SameLine();
+                ImGuiComponents.HelpMarker("This takes Road-To-90 status into consideration! Buy whatever number you see!");
+                ImGui.TableHeadersRow();
+
+                void JobRow(ref bool active, string label, ClassJob? job, ref int targetValue, string reqMat, int qtyText, bool eligible, string statusText)
+                {
+                    ImGui.TableNextRow();
+
+                    ImGui.TableNextColumn();
+                    using (var disabledEnable = ImRaii.Disabled(!eligible))
+                    {
+                        bool a = active;
+                        if (ImGui.Checkbox($"##use_{label}", ref a))
+                        {
+                            active = a;
+                            WorkshoppaModule.Instance?.SaveConfig();
+                        }
+                    }
+
+                    if (!eligible && active)
+                    {
+                        active = false;
+                        WorkshoppaModule.Instance?.SaveConfig();
+                    }
+
+                    if (!eligible)
+                    {
+                        ImGui.SameLine();
+                        ImGui.TextColored(new Vector4(1f, 0.8f, 0.2f, 1f), "⚠");
+                        if (ImGui.IsItemHovered())
+                        {
+                            ImGui.BeginTooltip();
+                            ImGui.TextUnformatted(statusText);
+                            ImGui.EndTooltip();
+                        }
+                    }
+
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted(label);
+
+                    ImGui.TableNextColumn();
+                    if (job == null)
+                    {
+                        ImGui.TextDisabled("?");
+                    }
+                    else
+                    {
+                        var current = ps.GetClassJobLevel(job.Value);
+                        ImGui.TextUnformatted(current > 0 ? current.ToString() : "-");
+                    }
+
+                    ImGui.TableNextColumn();
+                    using (var disabledTarget = ImRaii.Disabled(!eligible || !active))
+                    {
+                        int tmp = targetValue;
+                        ImGui.SetNextItemWidth(80f * ImGuiHelpers.GlobalScale);
+                        if (ImGui.InputInt($"##target_{label}", ref tmp))
+                        {
+                            tmp = WorkshoppaHelpers.ClampTargetLevel(tmp);
+                            if (tmp != targetValue)
+                            {
+                                targetValue = tmp;
+                                WorkshoppaModule.Instance?.SaveConfig();
+                            }
+                        }
+                    }
+
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted(reqMat);
+
+                    ImGui.TableNextColumn();
+                    if (eligible)
+                        ImGui.TextUnformatted($"{qtyText}");
+                    else
+                        ImGui.TextDisabled($"{qtyText}");
+                }
+
+                JobRow(ref config.CrpTargetActive, "CRP", crp, ref config.CrpTargetLevel, "Elm Lumber", crpQtyText, crpEligible, crpStatusText);
+                JobRow(ref config.MinTargetActive, "MIN", min, ref config.MinTargetLevel, "Mudstone", minQtyText, minEligible, minStatusText);
+                JobRow(ref config.BtnTargetActive, "BTN", btn, ref config.BtnTargetLevel, "Spruce Log", btnQtyText, btnEligible, btnStatusText);
+
+                ImGui.EndTable();
+            }
+
+            // ---------------------------
+            // Commands
+            // ---------------------------
+            ImGui.Separator();
+            ImGuiHelpers.ScaledDummy(8f);
+            ImGui.TextUnformatted("Commands:");
             ImGuiHelpers.ScaledDummy(4f);
-            if (ImGui.BeginTable("WorkshoppaCommands", 2,
-                ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg))
+
+            if (ImGui.BeginTable("WorkshoppaCommands", 2, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg))
             {
                 ImGui.TableSetupColumn("Command", ImGuiTableColumnFlags.WidthFixed);
                 ImGui.TableSetupColumn("Description", ImGuiTableColumnFlags.WidthStretch);
@@ -127,17 +252,6 @@ namespace VIWI.UI.Pages
 
             if (ImGui.Button("Open Workshoppa"))
                 WorkshoppaModule.Instance?.OpenWorkshoppa();
-
-            /* -- TODO: Automate travel to these vendors??
-            ImGui.SameLine();
-            if (ImGui.Button("Open Repair Kit"))
-                WorkshoppaModule.Instance?.OpenRepairKit();
-
-            ImGui.SameLine();
-
-            if (ImGui.Button("Open Ceruleum Tanks"))
-                WorkshoppaModule.Instance?.OpenTanks();
-            */
         }
     }
 }

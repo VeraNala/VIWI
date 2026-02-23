@@ -1,9 +1,6 @@
-using Dalamud.Game.Addon.Lifecycle;
-using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using ECommons;
-using ECommons.Automation;
 using ECommons.Automation.NeoTaskManager;
 using ECommons.Automation.UIInput;
 using ECommons.ExcelServices;
@@ -27,7 +24,7 @@ namespace VIWI.Modules.AutoLogin
     internal unsafe class AutoLoginModule : VIWIModuleBase<AutoLoginConfig>
     {
         public const string ModuleName = "AutoLogin";
-        public const string ModuleVersion = "1.1.1";
+        public const string ModuleVersion = "1.2.0";
         public override string Name => ModuleName;
         public override string Version => ModuleVersion;
         public AutoLoginConfig _configuration => ModuleConfig;
@@ -87,8 +84,6 @@ namespace VIWI.Modules.AutoLogin
             ClientState.Login += OnLogin;
             ClientState.Logout += OnLogout;
             ClientState.TerritoryChanged += TerritoryChange;
-
-            AddonLifecycle.RegisterListener(AddonEvent.PostReceiveEvent, "SelectString", ServiceAccountSelectStringPostReceiveEvent);
         }
 
         public override void Disable()
@@ -97,8 +92,6 @@ namespace VIWI.Modules.AutoLogin
             ClientState.Login -= OnLogin;
             ClientState.Logout -= OnLogout;
             ClientState.TerritoryChanged -= TerritoryChange;
-
-            AddonLifecycle.UnregisterListener(AddonEvent.PostReceiveEvent, "SelectString", ServiceAccountSelectStringPostReceiveEvent);
 
             taskManager.Abort();
             LobbyErrorHandlerHook?.Disable();
@@ -286,8 +279,8 @@ namespace VIWI.Modules.AutoLogin
             PluginLog.Information("[AutoLogin] Starting AutoLogin Loop");
 
             taskManager.Enqueue(() => SelectDataCenterMenu(), "SelectDataCenterMenu");
-            taskManager.Enqueue(() => SelectServiceAccountIndex(index), "SelectServiceAccount");
             taskManager.Enqueue(() => SelectDataCenter(dc, cWorld), "SelectDataCenter");
+            taskManager.Enqueue(() => SelectServiceAccountIndex(index), "SelectServiceAccount");
             taskManager.Enqueue(() => SelectCharacter(chara, hWorld, cWorld, dc), "SelectCharacter");
             taskManager.Enqueue(() => ConfirmLogin(), "ConfirmLogin");
         }
@@ -411,87 +404,6 @@ namespace VIWI.Modules.AutoLogin
         }
         #endregion
 
-        #region Step 1.5 - Service Account Menu
-        private unsafe bool SelectServiceAccountIndex(int idx)
-        {
-            if (IsLobbyErrorVisible()) return false;
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "TitleDCWorldMap", out var dc) && dc->IsVisible)
-                return true;
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "_CharaSelectListMenu", out var chara) && chara->IsVisible)
-                return true;
-
-            if (!TryGetServiceAccountSelectString(out var sel, out var entryCount))
-                return true;
-
-            if (idx < 0 || idx >= entryCount)
-            {
-                PluginLog.Warning($"[AutoLogin] Saved ServiceAccountIndex={idx} out of range (entries={entryCount}). Please manually select to refresh.");
-                return false;
-            }
-
-            if (EzThrottler.Throttle("AutoLogin.SelectServiceAccount", 100))
-            {
-                PluginLog.Information($"[AutoLogin] Auto-selecting service account index {idx}");
-                sel->AtkUnitBase.FireCallbackInt(idx);
-            }
-            return false;
-        }
-        private unsafe bool TryGetServiceAccountSelectString(out AddonSelectString* sel, out int entryCount)
-        {
-            sel = null;
-            entryCount = 0;
-
-            if (!AddonHelpers.TryGetAddonByName<AddonSelectString>(GameGui, "SelectString", out var s))
-                return false;
-
-            if (!AddonState.IsAddonReady(&s->AtkUnitBase) || !s->AtkUnitBase.IsVisible)
-                return false;
-
-            var m = new AddonMaster.SelectString((void*)s);
-            if (!IsServiceAccountPromptText(m.Text))
-                return false;
-
-            var popup = s->PopupMenu.PopupMenu;
-            entryCount = popup.EntryCount;
-            if (entryCount <= 0)
-                return false;
-
-            sel = s;
-            return true;
-        }
-        private bool IsServiceAccountPromptText(string text)
-        {
-            var compareTo = DataManager.GetExcelSheet<Lobby>()?.GetRow(11).Text.ExtractText();
-            return !string.IsNullOrEmpty(compareTo) && string.Equals(text, compareTo, StringComparison.Ordinal);
-        }
-        private unsafe void ServiceAccountSelectStringPostReceiveEvent(AddonEvent type, AddonArgs args)
-        {
-            try
-            {
-                if (!_configuration.Enabled) return;
-
-                if (args is not AddonReceiveEventArgs rea)
-                    return;
-
-                if (!TryGetServiceAccountSelectString(out _, out var entryCount))
-                    return;
-
-                var idx = (int)rea.EventParam;
-                if (idx < 0 || idx >= entryCount)
-                    return;
-
-                _configuration.ServiceAccountIndex = idx;
-                SaveConfig();
-
-                PluginLog.Information($"[AutoLogin] Learned ServiceAccountIndex={idx} from manual selection.");
-            }
-            catch (Exception ex)
-            {
-                PluginLog.Warning(ex, "[AutoLogin] ServiceAccountSelectStringPostReceiveEvent failed.");
-            }
-        }
-        #endregion
-
         #region Step 2 - Data Center Selection Menu
         private bool SelectDataCenter(int dc, string currWorld)
         {
@@ -540,6 +452,142 @@ namespace VIWI.Modules.AutoLogin
 
             return false;
         }
+        #endregion
+
+        #region Step 2.5 - Service Account Menu
+
+        private Hook<AddonSelectString.PopupMenuDerive.Delegates.ReceiveEvent>? _serviceAccountHook;
+        private unsafe AddonSelectString.PopupMenuDerive* _hookedPopup;
+        private bool _serviceAccountPromptActive;
+
+        private unsafe bool SelectServiceAccountIndex(int _)
+        {
+            if (IsLobbyErrorVisible())
+                return false;
+
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "_CharaSelectWorldServer", out var _))
+                return true;
+
+            if (TryGetServiceAccountSelectString(out var master, out var entryCount))
+            {
+                if (!_serviceAccountPromptActive)
+                {
+                    _serviceAccountPromptActive = true;
+                    PluginLog.Information($"[AutoLogin] Service account prompt detected (entries={entryCount}). Pausing AutoLogin.");
+                }
+
+                EnsureServiceAccountHook();
+                return false;
+            }
+            if (_serviceAccountPromptActive)
+            {
+                _serviceAccountPromptActive = false;
+                UnhookServiceAccountPopup();
+                PluginLog.Verbose("[AutoLogin] Service account prompt closed.");
+            }
+
+            return false;
+        }
+
+        private bool TryGetServiceAccountSelectString(out AddonMaster.SelectString m, out int entryCount)
+        {
+            m = default!;
+            entryCount = 0;
+
+            if (!ECommons.GenericHelpers.TryGetAddonMaster<AddonMaster.SelectString>(out var master))
+                return false;
+
+            if (!master.IsAddonReady)
+                return false;
+
+            var compareTo = DataManager.GetExcelSheet<Lobby>()?.GetRow(11).Text.ExtractText();
+            if (string.IsNullOrEmpty(compareTo))
+                return false;
+
+            if (!string.Equals(master.Text, compareTo, StringComparison.Ordinal))
+                return false;
+
+            entryCount = master.Entries?.Count() ?? 0;
+            if (entryCount <= 0)
+                return false;
+
+            m = master;
+            return true;
+        }
+
+        private unsafe void EnsureServiceAccountHook()
+        {
+            if (_serviceAccountHook != null)
+                return;
+
+            if (!AddonHelpers.TryGetAddonByName<AddonSelectString>(GameGui, "SelectString", out var addon))
+                return;
+
+            if (!AddonState.IsAddonReady(&addon->AtkUnitBase))
+                return;
+
+            var popup = (AddonSelectString.PopupMenuDerive*)&addon->PopupMenu;
+
+            var vtbl = *(nint**)popup;
+            if (vtbl == null)
+                return;
+
+            var receiveEventPtr = vtbl[2]; // 0=Dtor, 1=ReceiveGlobalEvent, 2=ReceiveEvent
+            if (receiveEventPtr == nint.Zero)
+                return;
+
+            _hookedPopup = popup;
+
+            _serviceAccountHook = HookProvider.HookFromAddress<AddonSelectString.PopupMenuDerive.Delegates.ReceiveEvent>(receiveEventPtr, ServiceAccountReceiveEventDetour);
+            _serviceAccountHook.Enable();
+
+            PluginLog.Information("[AutoLogin] Hooked SelectString PopupMenu ReceiveEvent.");
+        }
+
+        private unsafe void ServiceAccountReceiveEventDetour(
+            AddonSelectString.PopupMenuDerive* thisPtr,
+            AtkEventType eventType,
+            int eventParam,
+            AtkEvent* atkEvent,
+            AtkEventData* atkEventData)
+        {
+            try
+            {
+                if (_configuration.Enabled && _serviceAccountPromptActive)
+                {
+                    if (TryGetServiceAccountSelectString(out _, out var entryCount))
+                    {
+                        var idx = eventParam;
+
+                        // If your environment turns out to be 1-based, subtract here:
+                        // idx -= 1;
+
+                        if (idx >= 0 && idx < entryCount)
+                        {
+                            _configuration.ServiceAccountIndex = idx;
+                            SaveConfig();
+
+                            PluginLog.Information($"[AutoLogin] Learned ServiceAccountIndex={idx}.");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                PluginLog.Warning(ex, "[AutoLogin] ServiceAccountReceiveEventDetour failed.");
+            }
+
+            _serviceAccountHook!.Original(thisPtr, eventType, eventParam, atkEvent, atkEventData);
+        }
+
+        private void UnhookServiceAccountPopup()
+        {
+            _serviceAccountHook?.Disable();
+            _serviceAccountHook?.Dispose();
+            _serviceAccountHook = null;
+            _hookedPopup = null;
+        }
+
         #endregion
 
         #region Step 3 - Character Selection
@@ -622,7 +670,7 @@ namespace VIWI.Modules.AutoLogin
             if (_configuration.LoginCommands.Count == 0)
                 return;
 
-            foreach (var cmd in _configuration.LoginCommands)
+            /*foreach (var cmd in _configuration.LoginCommands) // Disabled until bugfix
             {
                 taskManager.EnqueueDelay(250);
                 taskManager.Enqueue(() =>
@@ -638,7 +686,7 @@ namespace VIWI.Modules.AutoLogin
                     }
                     return true;
                 }, $"AutoLogin.RunCmd:{cmd}");
-            }
+            }*/
         }
         private bool ARActiveSkipLoginCommands()
         {

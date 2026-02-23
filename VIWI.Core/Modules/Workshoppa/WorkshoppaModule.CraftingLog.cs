@@ -11,7 +11,10 @@ namespace VIWI.Modules.Workshoppa;
 internal sealed partial class WorkshoppaModule
 {
     private void InteractWithFabricationStation(IGameObject fabricationStation)
-        => InteractWithTarget(fabricationStation);
+    {
+        InteractWithTarget(fabricationStation);
+        _continueAt = DateTime.Now.AddSeconds(0.5);
+    }
 
     private void TakeItemFromQueue()
     {

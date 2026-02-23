@@ -173,21 +173,23 @@ internal sealed class WorkshoppaWindow : Window
                 _checkInventory = false;
             }
             ImGui.EndDisabled();
-            ImGui.BeginDisabled(!NearFabricationStation || _module.CurrentStage != Stage.Stopped || !IsDiscipleOfHandOrLand);
-            if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.LevelUpAlt, "Level MIN"))
+            bool canLevel =
+                NearFabricationStation
+                && _module.CurrentStage == Stage.Stopped
+                && IsDiscipleOfHandOrLand
+                && _module.AnyLevelingTargetsEnabled();
+
+            ImGui.BeginDisabled(!canLevel);
+            if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.LevelUpAlt, "Level Up Classes"))
             {
                 StartLevelingConditions();
             }
-            ImGuiComponents.HelpMarker("**Clicking this will clear your QUEUE!!**\n\n" +
+            ImGuiComponents.HelpMarker("SEE VIWI CONFIG - WORKSHOPPA - GRINDSTONE\n" + 
+                "**Note that clicking this will clear your QUEUE!!**\n\n" +
                 "This is an experimental leveling feature that will repeatedly start and\n" +
-                "discontinue projects while turning in Mudstones to level MIN\n\n" +
-                "This only requires you to be at least level 20 MIN to start,\n" +
-                "and is a bit costly in later levels, but takes minimal time and effort.\n\n" +
-                "Some Common Breakpoints for Reference:\n" +
-                "Lvl 20 -> 60 - 23,017 Mudstone, (23 Stacks) - 713k\n" +
-                "Lvl 20 -> 70 - 66,061 Mudstone, (66 Stacks) - 2.04m\n" +
-                "Lvl 20 -> 80 - 148,924 Mudstone, (149 Stacks) - 4.61m\n" +
-                "Lvl 20 -> 90 - 329,422 Mudstone, (330 Stacks) - 10.2m\n" +
+                "discontinue projects while turning in Materials to level various Classes\n\n" +
+                "This only requires you to meet a minimum level to start,\n" +
+                "and is a bit costly in later levels, but takes minimal time and effort on your part.\n\n" +
                 "Note that after level 90, Workshop projects no longer grant EXP.");
 
             ImGui.EndDisabled();

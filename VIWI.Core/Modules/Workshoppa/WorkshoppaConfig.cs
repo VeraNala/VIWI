@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using TerraFX.Interop.Windows;
 using VIWI.Modules.Workshoppa.GameData;
 
 namespace VIWI.Modules.Workshoppa;
@@ -14,7 +15,9 @@ public sealed class WorkshoppaConfig
     public List<QueuedItem> ItemQueue { get; set; } = new();
     public bool EnableRepairKitCalculator { get; set; } = true;
     public bool EnableCeruleumTankCalculator { get; set; } = true;
-    public bool EnableMudstoneCalculator { get; set; } = true;
+    public bool EnableGrindstoneShopCalculator { get; set; } = true;
+    public bool TeleToWorkshop { get; set; } = false;
+
     public TurnInMode Mode = TurnInMode.Normal;
     public List<Preset> Presets { get; set; } = new();
 
@@ -90,4 +93,13 @@ public sealed class WorkshoppaConfig
         Normal = 0,
         Leveling = 1,
     }
+
+    public bool CrpTargetActive = false;
+    public int CrpTargetLevel = 60;
+
+    public bool MinTargetActive = false;
+    public int MinTargetLevel = 60;
+
+    public bool BtnTargetActive = false;
+    public int BtnTargetLevel = 60;
 }

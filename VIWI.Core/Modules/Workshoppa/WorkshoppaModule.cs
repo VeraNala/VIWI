@@ -3,6 +3,7 @@ using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Command;
 using Dalamud.Plugin.Services;
+using ECommons.DalamudServices;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
@@ -20,7 +21,7 @@ namespace VIWI.Modules.Workshoppa;
 internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig>
 {
     public const string ModuleName = "Workshoppa";
-    public const string ModuleVersion = "1.0.2";
+    public const string ModuleVersion = "1.1.0";
     public override string Name => ModuleName;
     public override string Version => ModuleVersion;
     public WorkshoppaConfig _configuration => ModuleConfig;
@@ -49,18 +50,32 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
     private WorkshoppaWindow _mainWindow = null!;
     private WorkshoppaRepairKitWindow _repairKitWindow = null!;
     private WorkshoppaCeruleumTankWindow _ceruleumTankWindow = null!;
-    private WorkshoppaMudstoneWindow _mudstoneWindow = null!;
+    private WorkshoppaGrindstoneShopWindow _grindstoneShopWindow = null!;
 
     private Stage _currentStageInternal = Stage.Stopped;
     private DateTime _continueAt = DateTime.MinValue;
     private DateTime _fallbackAt = DateTime.MaxValue;
+
+    private StackMergeRunner? _mergeRunner;
+    private bool _mergePending;
+    private uint _mergeItemId;
+    private uint _mergeRequired;
+    private string _mergeItemName = "";
+    private int _mergeAttempts;
+    private const int MaxMergeAttempts = 2;
+    private bool _mergePassInFlight;
+
+    private int _stallTicks;
+    private const int MaxStallTicks = 2000;
+    private Stage _lastStage;
+    private DateTime _lastProgressAt = DateTime.MinValue;
+    private static readonly TimeSpan MaxNoProgress = TimeSpan.FromSeconds(15);
 
     public override void Initialize(VIWIConfig config)
     {
         Instance = this;
         base.Initialize(config);
         _externalPluginHandler = new ExternalPluginHandler(PluginInterface, PluginLog);
-        //_configuration = (WorkshoppaConfig?)_pluginInterface.GetPluginConfig() ?? new WorkshoppaConfig();
         _workshopCache = new WorkshopCache(DataManager, PluginLog);
         _gameStrings = new(DataManager, PluginLog);
 
@@ -70,8 +85,8 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
         CorePlugin.WindowSystem.AddWindow(_repairKitWindow);
         _ceruleumTankWindow = new(PluginLog, GameGui, AddonLifecycle, _configuration, _externalPluginHandler, ChatGui);
         CorePlugin.WindowSystem.AddWindow(_ceruleumTankWindow);
-        _mudstoneWindow = new(PluginLog, GameGui, AddonLifecycle, _configuration, _externalPluginHandler, ChatGui);
-        CorePlugin.WindowSystem.AddWindow(_mudstoneWindow);
+        _grindstoneShopWindow = new(PluginLog, GameGui, AddonLifecycle, _configuration, _externalPluginHandler, ChatGui);
+        CorePlugin.WindowSystem.AddWindow(_grindstoneShopWindow);
 
         if (_configuration.Enabled) 
             Enable();
@@ -91,7 +106,9 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
 
         _repairKitWindow?.EnableShopListeners();
         _ceruleumTankWindow?.EnableShopListeners();
-        _mudstoneWindow?.EnableShopListeners();
+        _grindstoneShopWindow?.EnableShopListeners();
+        _mergeRunner = new StackMergeRunner(Svc.Framework, canOperate: () => Svc.ClientState.IsLoggedIn, moveDelayMs: 175);
+
         AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "SelectYesno", SelectYesNoPostSetup);
         AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "Request", RequestPostSetup);
         AddonLifecycle.RegisterListener(AddonEvent.PostRefresh, "Request", RequestPostRefresh);
@@ -102,6 +119,8 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
     {
         _repairKitWindow?.DisableShopListeners();
         _ceruleumTankWindow?.DisableShopListeners();
+        _grindstoneShopWindow?.DisableShopListeners();
+        _mergeRunner?.Dispose();
         AddonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "ContextIconMenu", ContextIconMenuPostReceiveEvent);
         AddonLifecycle.UnregisterListener(AddonEvent.PostRefresh, "Request", RequestPostRefresh);
         AddonLifecycle.UnregisterListener(AddonEvent.PostSetup, "Request", RequestPostSetup);
@@ -128,7 +147,7 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
         if (_mainWindow != null && _mainWindow.IsOpen) _mainWindow.IsOpen = false;
         if (_repairKitWindow != null) _repairKitWindow.IsOpen = false;
         if (_ceruleumTankWindow != null) _ceruleumTankWindow.IsOpen = false;
-        if (_mudstoneWindow != null) _mudstoneWindow.IsOpen = false;
+        if (_grindstoneShopWindow != null) _grindstoneShopWindow.IsOpen = false;
     }
 
     public override void Dispose()
@@ -139,7 +158,7 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
         {
             if (_ceruleumTankWindow != null) _ceruleumTankWindow.Dispose();
             if (_repairKitWindow != null) _repairKitWindow.Dispose();
-            if (_mudstoneWindow != null) _mudstoneWindow.Dispose();
+            if (_grindstoneShopWindow != null) _grindstoneShopWindow.Dispose();
         }
         catch (Exception)
         {
@@ -214,7 +233,7 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
                 {
                     _externalPluginHandler.Restore();
                     CurrentStage = Stage.Stopped;
-                    _turninCount = 0;
+                    ResetLevelingRuntimeState();
                     _configuration.Mode = TurnInMode.Normal;
                     SaveConfig();
                 }
@@ -231,7 +250,29 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
 
             if (CurrentStage != Stage.Stopped && CurrentStage != Stage.RequestStop && !_externalPluginHandler.Saved)
                 _externalPluginHandler.Save();
-
+            if (CurrentStage != Stage.Stopped && CurrentStage == _lastStage)
+            {
+                _stallTicks++;
+                if (_stallTicks >= MaxStallTicks || (_lastProgressAt != DateTime.MinValue && DateTime.Now - _lastProgressAt > MaxNoProgress))
+                {
+                    if (CurrentStage is Stage.MergeStacks)
+                    {
+                        CurrentStage = Stage.TargetFabricationStation;
+                        return;
+                    }
+                    else
+                    {
+                        ChatGui.PrintError("[Workshoppa] Stall detected, Bailing out.");
+                        CurrentStage = Stage.RequestStop;
+                    }
+                    return;
+                }
+            }
+            else
+            {
+                _stallTicks = 0;
+                _lastStage = CurrentStage;
+            }
             switch (CurrentStage)
             {
                 case Stage.TakeItemFromQueue:
@@ -248,17 +289,19 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
                     break;
 
                 case Stage.TargetFabricationStation:
-                    if (_configuration.CurrentlyCraftedItem is { StartedCrafting: true })
+                    if (_configuration.CurrentlyCraftedItem is { StartedCrafting: true } || _mergeAttempts > 0)
                         CurrentStage = Stage.SelectCraftBranch;
                     else
                         CurrentStage = Stage.OpenCraftingLog;
-
+                    MarkProgress();
                     InteractWithFabricationStation(fabricationStation!);
 
                     break;
 
                 case Stage.OpenCraftingLog:
                     OpenCraftingLog();
+                    MarkProgress();
+                    InteractWithFabricationStation(fabricationStation!); // Safety Check
                     break;
 
                 case Stage.SelectCraftCategory:
@@ -276,7 +319,7 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
                 case Stage.RequestStop:
                     _externalPluginHandler.Restore();
                     _externalPluginHandler.RestoreTextAdvance();
-                    _turninCount = 0;
+                    ResetLevelingRuntimeState();
                     _configuration.Mode = TurnInMode.Normal;
                     CurrentStage = Stage.Stopped;
                     break;
@@ -290,6 +333,30 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
                         ContributeSpecificMaterial();
                     else
                         ContributeMaterials();
+                    MarkProgress();
+                    break;
+
+                case Stage.MergeStacks:
+                    if (_mergeRunner.IsRunning)
+                        break;
+                    if (HasItemInSingleSlot(_mergeItemId, _mergeRequired))
+                    {
+                        PluginLog.Information($"[Workshoppa] Merge satisfied for {_mergeRequired}x {_mergeItemName}, resuming.");
+                        ClearMergeState();
+                        CurrentStage = Stage.TargetFabricationStation;
+                        MarkProgress();
+                        break;
+                    }
+
+                    if (!_mergeRunner.TryStartMergeForItem(_mergeItemId))
+                    {
+                        PluginLog.Warning($"[Workshoppa] Merge pass could not start for {_mergeItemName} (plan empty or blocked).");
+                        _mergeAttempts++;
+                        break;
+                    }
+                    PluginLog.Information($"[Workshoppa] Merge pass {_mergeAttempts}/{MaxMergeAttempts} started for {_mergeItemName}...");
+                    CurrentStage = Stage.TargetFabricationStation;
+                    _continueAt = DateTime.Now.AddSeconds(5);
                     break;
 
                 case Stage.OpenRequestItemWindow:
@@ -337,6 +404,15 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
         craft = _workshopCache.Crafts.FirstOrDefault(x => x.WorkshopItemId == id.Value);
         return craft.WorkshopItemId != 0;
     }
+    private void ClearMergeState()
+    {
+        _mergePending = false;
+        _mergeAttempts = 0;
+        _mergeItemId = 0;
+        _mergeRequired = 0;
+        _mergeItemName = string.Empty;
+    }
+
     private void ProcessCommand(string command, string arguments)
     {
         /*if (arguments is "c" or "config")
@@ -362,18 +438,19 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
     }
     private void ProcessStoneBuyCommand(string command, string arguments)
     {
-        if (_mudstoneWindow.TryParseBuyRequest(arguments, out int missingQuantity))
-            _mudstoneWindow.StartPurchase(missingQuantity);
+        if (_grindstoneShopWindow.TryParseBuyRequest(arguments, out int missingQuantity))
+            _grindstoneShopWindow.StartPurchase(missingQuantity);
         else
             ChatGui.PrintError($"Usage: {command} <stacks>");
     }
 
-    private void ProcessStoneFillCommand(string command, string arguments)
+    private void ProcessStoneFillCommand(string command, string arguments) //TODO: add classjob
     {
-        if (_mudstoneWindow.TryParseFillRequest(arguments, out int missingQuantity))
-            _mudstoneWindow.StartPurchase(missingQuantity);
+        /*if (_grindstoneShopWindow.TryParseFillRequest(arguments, out int missingQuantity))
+            _grindstoneShopWindow.StartPurchase(missingQuantity);
         else
-            ChatGui.PrintError($"Usage: {command} <stacks>");
+            ChatGui.PrintError($"Usage: {command} <stacks>");*/
+        ChatGui.PrintError($"Disabled =[");
     }
     private void ProcessDarkMatterCommand(string command, string arguments)
     {

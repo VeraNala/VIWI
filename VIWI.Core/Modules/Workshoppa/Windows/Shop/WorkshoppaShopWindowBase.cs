@@ -103,6 +103,8 @@ internal abstract unsafe class WorkshoppaShopWindowBase : Window, IDisposable
             PositionCondition = ImGuiCond.Appearing;
         }
     }
+    protected virtual void OnAutoBuyCompleted(uint itemId, int desiredItems, int ownedItems) { }
+    internal void NotifyAutoBuyCompleted(uint itemId, int desiredItems, int ownedItems) => OnAutoBuyCompleted(itemId, desiredItems, ownedItems);
     /* REVISIT LATER IDK
     protected void DrawFollowControls()
     {

@@ -47,13 +47,13 @@ internal sealed partial class WorkshoppaModule
                 PluginLog.Verbose("Not a purchase confirmation match");
             }
         }
-        else if (_mudstoneWindow.IsOpen)
+        else if (_grindstoneShopWindow.IsOpen)
         {
-            PluginLog.Verbose($"Checking for Mudstone YesNo ({_mudstoneWindow.AutoBuyEnabled}, {_mudstoneWindow.IsAwaitingYesNo})");
-            if (_mudstoneWindow.AutoBuyEnabled && _mudstoneWindow.IsAwaitingYesNo && _gameStrings.PurchaseItemForCompanyCredits.IsMatch(text))
+            PluginLog.Verbose($"Checking for Mudstone YesNo ({_grindstoneShopWindow.AutoBuyEnabled}, {_grindstoneShopWindow.IsAwaitingYesNo})");
+            if (_grindstoneShopWindow.AutoBuyEnabled && _grindstoneShopWindow.IsAwaitingYesNo && _gameStrings.PurchaseItemForCompanyCredits.IsMatch(text))
             {
                 PluginLog.Information($"Selecting 'yes' ({text})");
-                _mudstoneWindow.IsAwaitingYesNo = false;
+                _grindstoneShopWindow.IsAwaitingYesNo = false;
                 addonSelectYesNo->AtkUnitBase.FireCallbackInt(0);
             }
             else
@@ -82,11 +82,17 @@ internal sealed partial class WorkshoppaModule
 
                 ConfirmCollectProductFollowUp();
             }
+            else if (CurrentStage == Stage.MergeStacks && _gameStrings.WorkshopMenuExit == text)
+            {
+                PluginLog.Information($"Selecting ({text})");
+                addonSelectYesNo->AtkUnitBase.FireCallbackInt(0);
+                _continueAt = DateTime.Now.AddSeconds(1);
+            }
             else if (CurrentStage == Stage.DiscontinueProject && _gameStrings.DiscontinueItem.IsMatch(text) && _configuration.Mode == WorkshoppaConfig.TurnInMode.Leveling)
             {
                 PluginLog.Information($"Selecting 'yes' ({text})");
                 addonSelectYesNo->AtkUnitBase.FireCallbackInt(0);
-                _turninCount = 0;
+                ResetLevelingProject();
                 _configuration.CurrentlyCraftedItem = null;
                 CurrentStage = Stage.SelectCraftBranch;
                 _continueAt = DateTime.Now.AddSeconds(1);

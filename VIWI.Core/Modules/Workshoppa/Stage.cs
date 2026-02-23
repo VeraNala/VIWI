@@ -13,6 +13,7 @@ public enum Stage
 
     SelectCraftBranch,
     ContributeMaterials,
+    MergeStacks,
     OpenRequestItemWindow,
     OpenRequestItemSelect,
     ConfirmRequestItemWindow,
