@@ -55,6 +55,7 @@ namespace VIWI.Modules.AutoLogin
         private DateTime _lastRestartRequest = DateTime.MinValue;
         private DateTime _lastErrorEpisode = DateTime.MinValue;
         private bool _inErrorRecovery = false;
+        private int _errorCounter;
         private bool _disconnected;
         private bool _pendingLoginCommands;
 
@@ -239,10 +240,19 @@ namespace VIWI.Modules.AutoLogin
                 PluginLog.Warning("[AutoLogin] Lobby error detected (likely 2002). Switching to error clear + resume.");
 
                 taskManager.Abort();
+                if (_configuration.SkipAuthError == true && _configuration.ClientLaunchPath != null && _errorCounter >= 3)
+                {
+
+                    PluginLog.Warning("[AutoLogin] Repeat Lobby errors detected, Assuming Auth Error and restarting Client.");
+                    _errorCounter = 0;
+                    RequestClientRestart();
+                    return;
+                }
                 taskManager.Enqueue(() => ClearDisconnectErrors(), "ClearDisconnectErrors");
                 taskManager.Enqueue(() =>
                 {
                     if (IsLobbyErrorVisible()) return false;
+                    _errorCounter++;
                     StartAutoLogin();
                     _inErrorRecovery = false;
                     return true;
@@ -559,9 +569,6 @@ namespace VIWI.Modules.AutoLogin
                     {
                         var idx = eventParam;
 
-                        // If your environment turns out to be 1-based, subtract here:
-                        // idx -= 1;
-
                         if (idx >= 0 && idx < entryCount)
                         {
                             _configuration.ServiceAccountIndex = idx;
@@ -633,7 +640,11 @@ namespace VIWI.Modules.AutoLogin
         private bool? ConfirmLogin()
         {
             if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "SelectOk", out _)) return true;
-            if (ClientState.IsLoggedIn) return true;
+            if (ClientState.IsLoggedIn)
+            {
+                _errorCounter = 0;
+                return true;
+            }
 
             if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "SelectYesno", out var yesnoPtr) && GenericHelpers.IsAddonReady(yesnoPtr))
             {
@@ -762,6 +773,15 @@ namespace VIWI.Modules.AutoLogin
                 return;
             }
             CommandManager.ProcessCommand("/shutdown");
+            taskManager.Enqueue(() => ClearDisconnectErrors(), "ClearDisconnectErrors");
+            taskManager.Enqueue(() =>
+            {
+                if (IsLobbyErrorVisible()) return false;
+                CommandManager.ProcessCommand("/shutdown");
+                return true;
+            }, "KillClient");
+            RequestClientRestart();
+
         }
         private void CheckRestartFlag()
         {
