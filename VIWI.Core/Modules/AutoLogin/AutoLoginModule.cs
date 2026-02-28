@@ -1,6 +1,8 @@
+using Dalamud.Game.Command;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using ECommons;
+using ECommons.Automation;
 using ECommons.Automation.NeoTaskManager;
 using ECommons.Automation.UIInput;
 using ECommons.ExcelServices;
@@ -17,6 +19,7 @@ using System.Runtime.InteropServices;
 using VIWI.Core;
 using VIWI.Helpers;
 using VIWI.IPC;
+using static FFXIVClientStructs.FFXIV.Client.UI.Misc.CharaView.Delegates;
 using static VIWI.Core.VIWIContext;
 
 namespace VIWI.Modules.AutoLogin
@@ -24,7 +27,7 @@ namespace VIWI.Modules.AutoLogin
     internal unsafe class AutoLoginModule : VIWIModuleBase<AutoLoginConfig>
     {
         public const string ModuleName = "AutoLogin";
-        public const string ModuleVersion = "1.2.0";
+        public const string ModuleVersion = "1.3.0";
         public override string Name => ModuleName;
         public override string Version => ModuleVersion;
         public AutoLoginConfig _configuration => ModuleConfig;
@@ -42,6 +45,7 @@ namespace VIWI.Modules.AutoLogin
 
         private readonly TaskManager taskManager = new();
         private readonly AutoRetainerIPC _autoRetainerIPC = new();
+        public const string RestartCommand = "/viwirestart";
 
         //internal IntPtr StartHandler;
         //internal IntPtr LoginHandler;
@@ -78,6 +82,19 @@ namespace VIWI.Modules.AutoLogin
 
             if (_configuration.ClientLaunchPath != null)
             {
+                CommandManager.AddHandler(RestartCommand, new CommandInfo((cmd, args) =>
+                {
+                    if (!_configuration.Enabled) return;
+                    if (!_configuration.SkipAuthError) return;
+                    if (string.IsNullOrWhiteSpace(_configuration.ClientLaunchPath)) return;
+
+                    var region = ParseRegionArg(args) ?? _configuration.CurrentRegion;
+                    RequestClientRestart(region);
+                })
+                {
+                    HelpMessage = "Restart the client using AutoLogin settings. Optional: /viwirestart NA|EU|OCE|JP",
+                    ShowInHelp = true,
+                });
                 CheckRestartFlag();
             }
             UpdateConfig();
@@ -93,6 +110,12 @@ namespace VIWI.Modules.AutoLogin
             ClientState.Login -= OnLogin;
             ClientState.Logout -= OnLogout;
             ClientState.TerritoryChanged -= TerritoryChange;
+
+            if (_configuration.ClientLaunchPath != null)
+            {
+                CommandManager.RemoveHandler(RestartCommand);
+                CheckRestartFlag();
+            }
 
             taskManager.Abort();
             LobbyErrorHandlerHook?.Disable();
@@ -188,40 +211,37 @@ namespace VIWI.Modules.AutoLogin
             if (!ClientState.IsLoggedIn || player == null)
                 return;
 
-            if (player.CharacterName != _configuration.CharacterName || string.IsNullOrEmpty(_configuration.CharacterName))
-            {
-                _configuration.CharacterName = player.CharacterName;
-            }
+            var snap = Snap;
 
-            if (player.HomeWorld.Value.Name.ExtractText() != _configuration.HomeWorldName || string.IsNullOrEmpty(_configuration.HomeWorldName))
-            {
-                _configuration.HomeWorldName = player.HomeWorld.Value.Name.ExtractText();
-            }
+            snap.CharacterName = player.CharacterName;
+            snap.HomeWorldName = player.HomeWorld.Value.Name.ExtractText();
+
             var worldSheet = DataManager.GetExcelSheet<World>();
-            var worldRow = worldSheet?.GetRow(player.HomeWorld.RowId);
-            if (worldRow != null)
+
+            var homeRow = worldSheet?.GetRow(player.HomeWorld.RowId);
+            if (homeRow != null)
             {
-                _configuration.DataCenterID = (int)worldRow.Value.DataCenter.RowId;
-                _configuration.DataCenterName = worldRow.Value.DataCenter.Value.Name.ExtractText();
+                snap.DataCenterID = (int)homeRow.Value.DataCenter.RowId;
+                snap.DataCenterName = homeRow.Value.DataCenter.Value.Name.ExtractText();
             }
 
+            snap.CurrentWorldName = player.CurrentWorld.Value.Name.ExtractText();
+            snap.Visiting = !string.Equals(snap.CurrentWorldName, snap.HomeWorldName, StringComparison.Ordinal);
 
-            _configuration.CurrentWorldName = player.CurrentWorld.Value.Name.ExtractText();
-            _configuration.Visiting = !string.Equals(_configuration.CurrentWorldName, _configuration.HomeWorldName, StringComparison.Ordinal);            
-            var cWorldRow = worldSheet?.GetRow(player.CurrentWorld.RowId);
-            if (cWorldRow != null)
+            var currentRow = worldSheet?.GetRow(player.CurrentWorld.RowId);
+            if (currentRow != null)
             {
-                _configuration.vDataCenterID = (int)cWorldRow.Value.DataCenter.RowId;
-                _configuration.vDataCenterName = cWorldRow.Value.DataCenter.Value.Name.ExtractText();
+                snap.vDataCenterID = (int)currentRow.Value.DataCenter.RowId;
+                snap.vDataCenterName = currentRow.Value.DataCenter.Value.Name.ExtractText();
             }
 
-            if (_configuration.HCMode)
-            {
-                _configuration.HCCurrentWorldName = _configuration.CurrentWorldName;
-                _configuration.HCVisiting = _configuration.Visiting;
-                _configuration.HCvDataCenterID = _configuration.vDataCenterID;
-                _configuration.HCvDataCenterName = _configuration.vDataCenterName;
-            }
+            string activeDcName = snap.Visiting && !string.IsNullOrWhiteSpace(snap.vDataCenterName) ? snap.vDataCenterName : snap.DataCenterName;
+
+            var region = DetectRegionFromDcName(activeDcName);
+            _configuration.CurrentRegion = region;
+
+            if (region != LoginRegion.Unknown && snap.HasMinimumIdentity)
+                _configuration.LastByRegion[region] = Copy(snap);
 
             SaveConfig();
         }
@@ -245,7 +265,7 @@ namespace VIWI.Modules.AutoLogin
 
                     PluginLog.Warning("[AutoLogin] Repeat Lobby errors detected, Assuming Auth Error and restarting Client.");
                     _errorCounter = 0;
-                    RequestClientRestart();
+                    RequestClientRestart(_configuration.CurrentRegion);
                     return;
                 }
                 taskManager.Enqueue(() => ClearDisconnectErrors(), "ClearDisconnectErrors");
@@ -276,23 +296,28 @@ namespace VIWI.Modules.AutoLogin
         }
 
         #region LoginLoop
-        public void StartAutoLogin()
+        private void EnqueueLoginLoop(LoginSnapshot snap)
         {
             if (!_configuration.Enabled) return;
-            var hWorld = _configuration.HCMode ? _configuration.HCHomeWorldName : _configuration.HomeWorldName;
-            var dc = _configuration.HCMode ? _configuration.HCDataCenterID : _configuration.DataCenterID;
-            var chara = _configuration.HCMode ? _configuration.HCCharacterName : _configuration.CharacterName;
-            var cWorld = _configuration.HCMode ? _configuration.HCCurrentWorldName : _configuration.CurrentWorldName;
-            var visit = _configuration.HCMode ? _configuration.HCVisiting : _configuration.Visiting;
+
+            var hWorld = snap.HomeWorldName;
+            var dc = snap.DataCenterID;
+            var chara = snap.CharacterName;
+            var cWorld = snap.CurrentWorldName;
             var index = _configuration.ServiceAccountIndex;
 
-            PluginLog.Information("[AutoLogin] Starting AutoLogin Loop");
+            PluginLog.Information($"[AutoLogin] Starting AutoLogin Loop ({chara}@{hWorld}, dcId={dc})");
 
             taskManager.Enqueue(() => SelectDataCenterMenu(), "SelectDataCenterMenu");
             taskManager.Enqueue(() => SelectDataCenter(dc, cWorld), "SelectDataCenter");
             taskManager.Enqueue(() => SelectServiceAccountIndex(index), "SelectServiceAccount");
             taskManager.Enqueue(() => SelectCharacter(chara, hWorld, cWorld, dc), "SelectCharacter");
             taskManager.Enqueue(() => ConfirmLogin(), "ConfirmLogin");
+        }
+
+        public void StartAutoLogin()
+        {
+            EnqueueLoginLoop(Snap);
         }
         #endregion
 
@@ -353,7 +378,7 @@ namespace VIWI.Modules.AutoLogin
                     PluginLog.Debug($"Skip Auth Error");
                     if (_configuration.SkipAuthError == true && _configuration.ClientLaunchPath != null)
                     {
-                        RequestClientRestart();
+                        RequestClientRestart(_configuration.CurrentRegion);
                     }
                 }
                 else
@@ -729,7 +754,9 @@ namespace VIWI.Modules.AutoLogin
         #endregion
 
         #region Step 5 - Restart on Auth Error
-        public void RequestClientRestart()
+        private int _shutdownRetry;
+
+        public void RequestClientRestart(LoginRegion? regionOverride = null)
         {
             if (string.IsNullOrWhiteSpace(ModuleConfig.ClientLaunchPath))
             {
@@ -741,13 +768,20 @@ namespace VIWI.Modules.AutoLogin
                 return;
 
             _lastRestartRequest = DateTime.Now;
+
+            var region = regionOverride ?? _configuration.CurrentRegion;
+            if (region == LoginRegion.Unknown)
+                region = LoginRegion.NA;
+
             ModuleConfig.RestartingClient = true;
+            ModuleConfig.PendingRestartRegion = region;
             SaveConfig();
 
             try
             {
                 var launchPath = ModuleConfig.ClientLaunchPath;
                 var launchArgs = ModuleConfig.ClientLaunchArgs ?? string.Empty;
+
                 if (!launchPath.Contains("://", StringComparison.OrdinalIgnoreCase) && !File.Exists(launchPath))
                 {
                     PluginLog.Warning($"[AutoLogin] Launch target does not exist: {launchPath}. Clearing restart flag.");
@@ -755,16 +789,14 @@ namespace VIWI.Modules.AutoLogin
                     return;
                 }
 
-                var psi = new ProcessStartInfo
+                Process.Start(new ProcessStartInfo
                 {
                     FileName = launchPath,
                     Arguments = launchArgs,
                     UseShellExecute = true,
-                };
+                });
 
-                Process.Start(psi);
-
-                PluginLog.Information($"[AutoLogin] Restart requested. Launched: {launchPath} {launchArgs}");
+                PluginLog.Information($"[AutoLogin] Restart requested (region={region}). Launched: {launchPath} {launchArgs}");
             }
             catch (Exception ex)
             {
@@ -772,32 +804,136 @@ namespace VIWI.Modules.AutoLogin
                 ClearRestartFlag();
                 return;
             }
-            CommandManager.ProcessCommand("/shutdown");
-            taskManager.Enqueue(() => ClearDisconnectErrors(), "ClearDisconnectErrors");
+
+            _shutdownRetry = 0;
+            taskManager.Abort();
+            _inErrorRecovery = false;
+            _pendingLoginCommands = false;
+            KillClient();
+        }
+
+        private void KillClient()
+        {
+            _shutdownRetry = 0;
+
+            taskManager.EnqueueDelay(200);
             taskManager.Enqueue(() =>
             {
-                if (IsLobbyErrorVisible()) return false;
-                CommandManager.ProcessCommand("/shutdown");
-                return true;
-            }, "KillClient");
-            RequestClientRestart();
+                PluginLog.Information("[AutoLogin] Attempting graceful shutdown.");
 
+                CommandManager.ProcessCommand("/shutdown");
+
+                return true;
+            }, "AutoLogin.ShutdownAttempt1");
+
+            taskManager.EnqueueDelay(200);
+            taskManager.Enqueue(() =>
+            {
+                if (ClientState.IsLoggedIn)
+                    CommandManager.ProcessCommand("/shutdown");
+
+                _shutdownRetry++;
+
+                return true;
+            }, "AutoLogin.ShutdownAttempt2");
+
+            taskManager.EnqueueDelay(200);
+            taskManager.Enqueue(() =>
+            {
+                PluginLog.Warning("[AutoLogin] Graceful shutdown failed, using /xlkill fallback.");
+
+                CommandManager.ProcessCommand("/xlkill");
+
+                return true;
+            }, "AutoLogin.ShutdownFallbackKill");
         }
         private void CheckRestartFlag()
         {
             if (!ModuleConfig.RestartingClient)
                 return;
 
-            PluginLog.Information($"[AutoLogin] Detected RestartingClient flag.");
-            StartAutoLogin();
+            var region = ModuleConfig.PendingRestartRegion;
+            PluginLog.Information($"[AutoLogin] Detected RestartingClient flag (region={region}).");
+
+            if (region != LoginRegion.Unknown &&
+                ModuleConfig.LastByRegion.TryGetValue(region, out var snap) &&
+                snap != null &&
+                snap.HasMinimumIdentity)
+            {
+                PluginLog.Information($"[AutoLogin] Restart with region snapshot: {region} ({snap.CharacterName}@{snap.HomeWorldName}).");
+                EnqueueLoginLoop(snap);
+            }
+
             ModuleConfig.AuthsRecovered++;
             ClearRestartFlag();
         }
+
         private void ClearRestartFlag()
         {
             ModuleConfig.RestartingClient = false;
+            ModuleConfig.PendingRestartRegion = LoginRegion.Unknown;
             SaveConfig();
+        }
+
+        private static LoginRegion? ParseRegionArg(string? args)
+        {
+            if (string.IsNullOrWhiteSpace(args))
+                return null;
+
+            return args.Trim().ToUpperInvariant() switch
+            {
+                "NA" => LoginRegion.NA,
+                "EU" => LoginRegion.EU,
+                "OCE" => LoginRegion.OCE,
+                "JP" => LoginRegion.JP,
+                _ => null
+            };
+        }
+        #endregion
+        #region Helpers
+        private LoginSnapshot Snap => _configuration.Current;
+
+        private static LoginSnapshot Copy(LoginSnapshot s) => new()
+        {
+            CharacterName = s.CharacterName,
+            HomeWorldName = s.HomeWorldName,
+            DataCenterID = s.DataCenterID,
+            DataCenterName = s.DataCenterName,
+            Visiting = s.Visiting,
+            CurrentWorldName = s.CurrentWorldName,
+            vDataCenterID = s.vDataCenterID,
+            vDataCenterName = s.vDataCenterName,
+        };
+
+        private static LoginRegion DetectRegionFromDcName(string? dcName)
+        {
+            if (string.IsNullOrWhiteSpace(dcName))
+                return LoginRegion.Unknown;
+
+            var dc = dcName.Trim();
+
+            if (dc.Equals("Aether", StringComparison.OrdinalIgnoreCase) ||
+                dc.Equals("Primal", StringComparison.OrdinalIgnoreCase) ||
+                dc.Equals("Crystal", StringComparison.OrdinalIgnoreCase) ||
+                dc.Equals("Dynamis", StringComparison.OrdinalIgnoreCase))
+                return LoginRegion.NA;
+
+            if (dc.Equals("Chaos", StringComparison.OrdinalIgnoreCase) ||
+                dc.Equals("Light", StringComparison.OrdinalIgnoreCase))
+                return LoginRegion.EU;
+
+            if (dc.Equals("Materia", StringComparison.OrdinalIgnoreCase))
+                return LoginRegion.OCE;
+
+            if (dc.Equals("Elemental", StringComparison.OrdinalIgnoreCase) ||
+                dc.Equals("Gaia", StringComparison.OrdinalIgnoreCase) ||
+                dc.Equals("Mana", StringComparison.OrdinalIgnoreCase) ||
+                dc.Equals("Meteor", StringComparison.OrdinalIgnoreCase))
+                return LoginRegion.JP;
+
+            return LoginRegion.Unknown;
         }
         #endregion
     }
+
 }

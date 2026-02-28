@@ -2,10 +2,11 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Components;
 using Dalamud.Interface.Utility;
+using Dalamud.Interface.Utility.Raii;
 using ECommons.ImGuiMethods;
 using ECommons.Logging;
+using System;
 using System.Numerics;
-using TerraFX.Interop.Windows;
 using VIWI.Core;
 using VIWI.Helpers;
 using VIWI.Modules.AutoLogin;
@@ -36,10 +37,14 @@ namespace VIWI.UI.Pages
                 ImGui.TextDisabled("AutoLogin is not initialized yet.");
                 return;
             }
+
+            var snap = config.Current;
+
             ImGuiHelpers.ScaledDummy(4f);
             ImGui.TextUnformatted($"AutoLogin - V{Version}");
             ImGui.SameLine();
             ImGui.TextColored(GradientColor.Get(ImGuiHelper.RainbowColorStart, ImGuiHelper.RainbowColorEnd, 500), "DDoS Begone!");
+
             ImGui.TextUnformatted("Enabled:");
             ImGui.SameLine();
             ImGui.TextColored(
@@ -50,6 +55,7 @@ namespace VIWI.UI.Pages
             ImGuiHelpers.ScaledDummy(4f);
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(8f);
+
             ImGui.TextUnformatted("Description:");
             ImGuiHelpers.ScaledDummy(4f);
             ImGui.TextWrapped(
@@ -57,111 +63,146 @@ namespace VIWI.UI.Pages
                 "and attempt to automatically reconnect to them in the event of a sudden disconnect.\n" +
                 "In addition, AutoLogin prevents your client from killing itself on any lobby/disconnection errors."
             );
+
             ImGuiHelpers.ScaledDummy(8f);
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(8f);
 
-
-            if (!string.IsNullOrEmpty(config.CharacterName))
+            // ----------------------------
+            // Current Snapshot
+            // ----------------------------
+            if (!string.IsNullOrWhiteSpace(snap.CharacterName))
             {
-                ImGui.TextUnformatted($"Last Logged In Character: {config.CharacterName} @ {config.HomeWorldName}");
-                if (config.Visiting)
-                {
-                    ImGui.TextUnformatted($"Current World: {config.CurrentWorldName}, on {config.vDataCenterName} ({config.vDataCenterID})");
-                }
-                ImGui.TextUnformatted($"Home Data Center: {config.DataCenterName} ({config.DataCenterID})");
+                if (config.ServiceAccountIndex > 0)
                 ImGui.TextUnformatted($"Service Account Index: {config.ServiceAccountIndex}");
+                ImGui.TextUnformatted($"Current Saved Character: {snap.CharacterName} @ {snap.HomeWorldName}");
+                ImGui.TextUnformatted($"Home Data Center: {snap.DataCenterName} ({snap.DataCenterID})");
+
+                if (snap.Visiting)
+                    ImGui.TextUnformatted($"Currently Visiting: {snap.CurrentWorldName}, on {snap.vDataCenterName} ({snap.vDataCenterID})");
+
+                if (config.CurrentRegion != LoginRegion.Unknown)
+                    ImGui.TextUnformatted($"Detected Region: {config.CurrentRegion}");
             }
             else
             {
-                ImGui.TextDisabled("No Character Detected" +
-                "\nAutoLogin updates character data on Logins, as well as World/Area changes" +
-                "\nIf you're logged in and seeing this message, move around!");
+                ImGui.TextDisabled(
+                    "No Character Detected" +
+                    "\nAutoLogin updates character data on Logins, as well as World/Area changes" +
+                    "\nIf you're logged in and seeing this message, move around!"
+                );
             }
 
+            // ----------------------------
+            // Per-Region Snapshot Summary
+            // ----------------------------
             ImGuiHelpers.ScaledDummy(8f);
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(8f);
 
-            bool HCMode = config.HCMode;
+            ImGui.TextUnformatted("Most Recent Character Per Region:");
+            ImGuiHelpers.ScaledDummy(4f);
 
-            if (ImGui.Checkbox("Hardcore Mode", ref HCMode))
+            DrawRegionRow(config, LoginRegion.NA);
+            DrawRegionRow(config, LoginRegion.EU);
+            DrawRegionRow(config, LoginRegion.OCE);
+            DrawRegionRow(config, LoginRegion.JP);
+
+            ImGuiHelpers.ScaledDummy(4f);
+            if (config.RestartingClient || config.PendingRestartRegion != LoginRegion.Unknown)
             {
-                config.HCMode = HCMode;
-                config.HCCharacterName = config.CharacterName;
-                config.HCHomeWorldName = config.HomeWorldName;
-                config.HCDataCenterID = config.DataCenterID;
-                config.HCDataCenterName = config.DataCenterName;
-                config.HCVisiting = config.Visiting;
-                config.HCCurrentWorldName = config.CurrentWorldName;
-                config.HCvDataCenterID = config.vDataCenterID;
-                config.HCvDataCenterName = config.vDataCenterName;
-                module?.SaveConfig();
-            }
-            ImGuiComponents.HelpMarker("--- Hardcore Mode will save your preferred character ---\nThis prioritizes logging back into the stored character \nin the event of a disconnect rather than the one \nyou were currently on (unless its the same one, duh!).");
-            if (HCMode)
-            {
-                if (!string.IsNullOrEmpty(config.HCCharacterName))
-                {
-                    ImGuiHelpers.ScaledDummy(8f);
-                    ImGui.TextUnformatted($"Hard Saved Character: {config.HCCharacterName} @ {config.HCHomeWorldName}");
-                    if (config.HCVisiting)
-                    {
-                        ImGui.TextUnformatted($"Current World: {config.HCCurrentWorldName}, on {config.HCvDataCenterName} ({config.HCvDataCenterID})");
-                    }
-                    ImGui.TextUnformatted($"Home Data Center: {config.HCDataCenterName} ({config.HCDataCenterID})");
-                }
-                else
-                {
-                    ImGui.TextDisabled("No Character Detected\n" +
-                    "\nAutoLogin updates your preferred character when you check the box!" +
-                    "\nMake sure you're logged into the character you want to save first!" +
-                    "\nOtherwise, AutoLogin updates on World/Area changes" +
-                    "\nSo if you're logged in and seeing this message, move around!");
-                }
+                ImGui.TextUnformatted($"Restart State: RestartingClient={config.RestartingClient}, PendingRegion={config.PendingRestartRegion}");
             }
 
-            ImGuiHelpers.ScaledDummy(2f);
+            // ----------------------------
+            // Restart on Auth Error + Launch Settings
+            // ----------------------------
+            ImGuiHelpers.ScaledDummy(8f);
+            ImGui.Separator();
+            ImGuiHelpers.ScaledDummy(8f);
 
             bool skipAuth = config.SkipAuthError;
-
             if (ImGui.Checkbox("Restart on Auth Error", ref skipAuth))
             {
                 config.SkipAuthError = skipAuth;
                 module?.SaveConfig();
             }
             ImGui.SameLine();
-            ImGuiComponents.HelpMarker("Experimental: Will attempt to restart your client in the event of an Auth Error." +
+            ImGuiComponents.HelpMarker(
+                "Experimental: Will attempt to restart your client in the event of an Auth Error." +
                 "\nSome notes on this:" +
                 "\nIf you have an OTP on your account you will need to use the XIV Auth App" +
                 "\nIf you do not enable \"Log in automatically\" in XIVLauncher this will not work." +
                 "\nIf you do not set up commands or AR Multi on launch, this will only log you back into your last character, nothing else." +
-                "\nYou are using this feature entirely at your own risk - It is literally accessing files on your PC to open clients.");
-            var cfg = config;
+                "\nYou are using this feature entirely at your own risk - It is literally accessing files on your PC to open clients."
+            );
+            ImGui.SameLine();
+            bool canRestart = config.SkipAuthError && !string.IsNullOrWhiteSpace(_launchPathBuf);
+            using (ImRaii.Disabled(!canRestart))
+            {
+                if (ImGui.Button("Restart Client"))
+                {
+                    config.ClientLaunchPath = _launchPathBuf;
+                    config.ClientLaunchArgs = _launchArgsBuf;
+                    module?.SaveConfig();
+                    module?.RequestClientRestart(config.CurrentRegion);
+                }
+            }
+            ImGui.SameLine();
+            ImGuiComponents.HelpMarker("Launches a new client using your settings, and kills this one - resetting your Auth Token.");
+
             if (!_buffersInitialized)
             {
-                _launchPathBuf = cfg.ClientLaunchPath ?? "";
-                _launchArgsBuf = cfg.ClientLaunchArgs ?? "";
+                _launchPathBuf = config.ClientLaunchPath ?? "";
+                _launchArgsBuf = config.ClientLaunchArgs ?? "";
                 _buffersInitialized = true;
             }
-            ImGui.Text("Launch Path:");
-            ImGui.SetNextItemWidth(-1);
-            var path = ImGui.InputTextWithHint("##client_launch_path", "example: C:\\Program Files (x86)\\XIVLauncher\\XIVLauncher.exe", ref _launchPathBuf, 512, ImGuiInputTextFlags.EnterReturnsTrue);
-            if (ImGui.IsItemDeactivatedAfterEdit())
+
+            (string statusText, Vector4 statusColor) = ValidateLaunchSettings(_launchPathBuf, _launchArgsBuf, skipAuth);
+
+            ImGui.TextUnformatted("Status:");
+            ImGui.SameLine();
+            ImGui.TextColored(statusColor, statusText);
+
+            ImGuiHelpers.ScaledDummy(4f);
+
+            using (ImRaii.Disabled(!skipAuth))
             {
-                cfg.ClientLaunchPath = _launchPathBuf;
-                module?.SaveConfig();
-            }
-            ImGui.Text("Launch Arguments:");
-            ImGui.SetNextItemWidth(-1);
-            var args = ImGui.InputTextWithHint("##client_launch_args", "example: --roamingPath=\"%appdata%\\XIVLauncher\" --account=yoship-False-False", ref _launchArgsBuf, 512, ImGuiInputTextFlags.EnterReturnsTrue);
-            if (ImGui.IsItemDeactivatedAfterEdit())
-            {
-                cfg.ClientLaunchArgs = _launchArgsBuf;
-                module?.SaveConfig();
+                ImGui.Text("Launch Path:");
+                ImGui.SetNextItemWidth(-1);
+                ImGui.InputTextWithHint(
+                    "##client_launch_path",
+                    "example: C:\\Program Files (x86)\\XIVLauncher\\XIVLauncher.exe",
+                    ref _launchPathBuf,
+                    512,
+                    ImGuiInputTextFlags.EnterReturnsTrue
+                );
+                if (ImGui.IsItemDeactivatedAfterEdit())
+                {
+                    config.ClientLaunchPath = _launchPathBuf;
+                    module?.SaveConfig();
+                }
+
+                ImGui.Text("Launch Arguments:");
+                ImGui.SetNextItemWidth(-1);
+                ImGui.InputTextWithHint(
+                    "##client_launch_args",
+                    "example: --roamingPath=\"%appdata%\\XIVLauncher\" --account=yoship-False-False",
+                    ref _launchArgsBuf,
+                    512,
+                    ImGuiInputTextFlags.EnterReturnsTrue
+                );
+                if (ImGui.IsItemDeactivatedAfterEdit())
+                {
+                    config.ClientLaunchArgs = _launchArgsBuf;
+                    module?.SaveConfig();
+                }
             }
 
-            ImGuiHelpers.ScaledDummy(8f);
+            // ----------------------------
+            // Login Commands
+            // ----------------------------
+            /*ImGuiHelpers.ScaledDummy(8f);
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(8f);
 
@@ -169,7 +210,6 @@ namespace VIWI.UI.Pages
             ImGuiHelpers.ScaledDummy(4f);
 
             bool runLoginCommands = config.RunLoginCommands;
-
             if (ImGui.Checkbox("Run commands after successful disconnect recovery", ref runLoginCommands))
             {
                 config.RunLoginCommands = runLoginCommands;
@@ -179,6 +219,7 @@ namespace VIWI.UI.Pages
                 "These commands run once after the game reports a successful login.\n" +
                 "Commands are executed with a small delay between each."
             );
+
             bool skipWhenAR = config.ARActiveSkipLoginCommands;
             if (ImGui.Checkbox("Skip login commands when AutoRetainer is active", ref skipWhenAR))
             {
@@ -186,6 +227,7 @@ namespace VIWI.UI.Pages
                 module?.SaveConfig();
             }
             ImGuiComponents.HelpMarker("When Enabled, if AutoRetainer is Busy or in MultiMode, AutoLogin will not run custom login commands.");
+
             ImGuiHelpers.ScaledDummy(6f);
 
             config.LoginCommands ??= [];
@@ -193,11 +235,10 @@ namespace VIWI.UI.Pages
             int? pendingRemove = null;
             int? pendingMoveFrom = null;
             int? pendingMoveTo = null;
+
             ImGui.PushID("login_cmd_add");
             bool submit = ImGui.InputTextWithHint("##new_login_cmd", "Add command (e.g. /viwi)", ref _newLoginCmd, 512, ImGuiInputTextFlags.EnterReturnsTrue);
-
             ImGui.SameLine();
-
             submit |= ImGuiComponents.IconButton("add", FontAwesomeIcon.Plus);
 
             if (submit)
@@ -216,11 +257,9 @@ namespace VIWI.UI.Pages
                     }
 
                     _newLoginCmd = string.Empty;
-
                     ImGui.SetKeyboardFocusHere();
                 }
             }
-
             ImGui.PopID();
 
             if (config.LoginCommands.Count == 0)
@@ -274,6 +313,7 @@ namespace VIWI.UI.Pages
                     ImGui.PopID();
                 }
             }
+
             if (pendingRemove.HasValue)
             {
                 config.LoginCommands.RemoveAt(pendingRemove.Value);
@@ -283,8 +323,11 @@ namespace VIWI.UI.Pages
             {
                 MoveItem(config.LoginCommands, pendingMoveFrom.Value, pendingMoveTo.Value);
                 module?.SaveConfig();
-            }
+            }*/
 
+            // ----------------------------
+            // Stats
+            // ----------------------------
             ImGuiHelpers.ScaledDummy(8f);
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(8f);
@@ -299,15 +342,21 @@ namespace VIWI.UI.Pages
                 ImGui.TextColored(GradientColor.Get(ImGuiHelper.RainbowColorStart, ImGuiHelper.RainbowColorEnd, 500), "Typical NA Server day.");
             }
             else
+            {
                 ImGui.TextColored(GradientColor.Get(ImGuiHelper.RainbowColorStart, ImGuiHelper.RainbowColorEnd, 500), "YOSHIP SAVE US!! PLEASE WE'RE BEGGING YOU!!");
-            if (config.ClientLaunchPath != null)
+            }
+
+            if (config.SkipAuthError)
             {
                 ImGui.TextUnformatted($"VIWI has helped you recover from: {config.AuthsRecovered} Authentication Errors");
             }
 
+            // ----------------------------
+            // Dev debug button
+            // ----------------------------
+#pragma warning disable CS0162 // Unreachable code detected
             if (VIWIConfig.DEVMODE)
             {
-#pragma warning disable CS0162 // Unreachable code detected
                 float toggleWidth = 60f;
                 uint colBase = debugEnabled ? 0xFF27AE60u : 0xFF7F8C8Du;
                 uint colHovered = debugEnabled ? 0xFF2ECC71u : 0xFF95A5A6u;
@@ -325,16 +374,84 @@ namespace VIWI.UI.Pages
 
                     if (module != null && debugEnabled == true)
                     {
-                        module?.RequestClientRestart();
-                        PluginLog.Information("Testing Login Commands");
+                        // Use the new region-aware restart
+                        module.RequestClientRestart(config.CurrentRegion);
+                        PluginLog.Information("Triggered client restart (debug).");
                     }
                 }
-                ImGuiComponents.HelpMarker("Runs the same command queue that would execute after a successful login.");
+                ImGuiComponents.HelpMarker("Triggers the same restart path used for auth error recovery.");
                 ImGui.PopStyleColor(3);
                 ImGui.PopStyleVar(2);
-#pragma warning restore CS0162 // Unreachable code detected
             }
+#pragma warning restore CS0162 // Unreachable code detected
         }
+
+        private static (string Text, Vector4 Color) ValidateLaunchSettings(string launchPath, string launchArgs, bool featureEnabled)
+        {
+            var ok = new Vector4(0.3f, 1f, 0.3f, 1f);
+            var warn = new Vector4(1f, 0.85f, 0.25f, 1f);
+            var bad = new Vector4(1f, 0.3f, 0.3f, 1f);
+            var off = new Vector4(0.7f, 0.7f, 0.7f, 1f);
+
+            if (!featureEnabled)
+                return ("Enable \"Restart on Auth Error\" to edit launch settings.", off);
+
+            if (string.IsNullOrWhiteSpace(launchPath))
+                return ("Missing Launch Path.", bad);
+
+            var p = launchPath.Trim();
+            bool isUri = p.Contains("://", StringComparison.OrdinalIgnoreCase);
+
+            if (!isUri)
+            {
+                try
+                {
+                    if (!System.IO.File.Exists(p))
+                        return ("Launch Path does not exist.", bad);
+                }
+                catch
+                {
+                    return ("Launch Path is invalid.", bad);
+                }
+            }
+
+            bool looksLikeXivLauncher =
+                p.EndsWith("XIVLauncher.exe", StringComparison.OrdinalIgnoreCase) ||
+                p.IndexOf("xivlauncher", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            var args = (launchArgs ?? string.Empty).Trim();
+            bool hasAccount = args.IndexOf("--account=", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool hasRoaming = args.IndexOf("--roamingPath=", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (!looksLikeXivLauncher && !isUri)
+            {
+                return ("Path OK, but this doesn’t look like XIVLauncher (may not auto-login).", warn);
+            }
+
+            if (!hasAccount)
+            {
+                return ("Path OK. Missing --account=… (auto-login may not work).", warn);
+            }
+
+            if (!hasRoaming)
+                return ("Looks OK. (Tip: add --roamingPath=… if you use a custom XIVLauncherData path.)", ok);
+
+            return ("Looks OK.", ok);
+        }
+        private static void DrawRegionRow(AutoLoginConfig config, LoginRegion region)
+        {
+            config.LastByRegion ??= new();
+
+            if (!config.LastByRegion.TryGetValue(region, out var snap) || snap == null || string.IsNullOrWhiteSpace(snap.CharacterName))
+            {
+                ImGui.TextDisabled($"{region}: (none)");
+                return;
+            }
+
+            var visiting = snap.Visiting ? $" (visiting {snap.CurrentWorldName})" : string.Empty;
+            ImGui.TextUnformatted($"{region}: {snap.CharacterName} @ {snap.HomeWorldName}{visiting}");
+        }
+
         private static void MoveItem<T>(System.Collections.Generic.List<T> list, int from, int to)
         {
             if (from == to) return;
@@ -343,6 +460,5 @@ namespace VIWI.UI.Pages
 
             (list[from], list[to]) = (list[to], list[from]);
         }
-
     }
 }

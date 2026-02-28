@@ -181,7 +181,13 @@ internal sealed class RecipeTree
 
     private Recipe? GetFirstRecipeForItem(uint itemId)
     {
-        return _dataManager.GetExcelSheet<Recipe>().FirstOrDefault(x => x.RowId > 0 && x.ItemResult.RowId == itemId);
+        var sheet = _dataManager.GetExcelSheet<Recipe>();
+        if (sheet == null)
+            return null;
+
+        var recipe = sheet.FirstOrDefault(x => x.RowId > 0 && x.ItemResult.RowId == itemId);
+
+        return recipe.RowId > 0 ? recipe : (Recipe?)null;
     }
 
     private GatheringItem? GetGatheringItem(uint itemId)

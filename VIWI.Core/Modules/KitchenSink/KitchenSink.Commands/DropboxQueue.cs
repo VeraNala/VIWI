@@ -1,3 +1,11 @@
+using Dalamud.Game.Command;
+using Dalamud.Game.Text.SeStringHandling;
+using Dalamud.Plugin;
+using Dalamud.Plugin.Ipc;
+using Dalamud.Plugin.Services;
+using ECommons.Logging;
+using ECommons.Reflection;
+using FFXIVClientStructs.FFXIV.Client.Game;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -6,13 +14,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using Dalamud.Game.Command;
-using Dalamud.Game.Text.SeStringHandling;
-using Dalamud.Plugin;
-using Dalamud.Plugin.Ipc;
-using Dalamud.Plugin.Services;
-using FFXIVClientStructs.FFXIV.Client.Game;
-using ECommons.Reflection;
 
 namespace VIWI.Modules.KitchenSink.Commands;
 
@@ -110,6 +111,7 @@ internal sealed class DropboxQueue : IDisposable
     InventoryType.ArmoryRings,
     InventoryType.ArmorySoulCrystal,
     InventoryType.Crystals,
+    InventoryType.Currency,
 };
 
     private readonly ICommandManager _commandManager;
@@ -195,7 +197,10 @@ internal sealed class DropboxQueue : IDisposable
                 var haveNq = DefaultInventoryTypes.Sum(t => im->GetItemCountInContainer(item.ItemId, t, isHq: false));
                 var haveHq = DefaultInventoryTypes.Sum(t => im->GetItemCountInContainer(item.ItemId, t, isHq: true));
                 var have = haveNq + haveHq;
-
+                if (item.ItemId == 1) // Gil
+                {
+                    have = (int)Math.Min((ulong)int.MaxValue, im->GetGil());
+                }
                 return item with { Needed = item.Needed - have };
             })
             .Where(x => x.Needed > 0)
@@ -250,28 +255,27 @@ internal sealed class DropboxQueue : IDisposable
 
 	private ReadOnlyCollection<NeededItem>? ParseArguments(string arguments)
 	{
-		List<(string, NeededItem)> list = (from x in arguments.Split(' ')
-			select x.Split(':')).Select(delegate(string[] x)
-		{
-			if (x.Length != 2)
-			{
-				return ((string, NeededItem?))("Unable to parse " + string.Join(" ", x) + ".", null);
-			}
-			if (!uint.TryParse(x[0], out var result))
-			{
-				return ((string, NeededItem?))("Unable to parse item id " + x[0] + ".", null);
-			}
-			int result2;
-			if (x[1] == "*")
-			{
-				result2 = int.MaxValue;
-			}
-			else if (!int.TryParse(x[1], out result2))
-			{
-				return ((string, NeededItem?))("Unable to parse quantity " + x[1] + ".", null);
-			}
-			return (string.Empty, new NeededItem(result, result2));
-		}).ToList();
+        List<(string, NeededItem)> list = (from x in arguments.Split(' ') select x.Split(':')).Select(delegate (string[] x)
+        {
+            if (x.Length != 2)
+		    {
+			    return ((string, NeededItem?))("Unable to parse " + string.Join(" ", x) + ".", null);
+		    }
+		    if (!uint.TryParse(x[0], out var result))
+		    {
+			    return ((string, NeededItem?))("Unable to parse item id " + x[0] + ".", null);
+		    }
+		    int result2;
+		    if (x[1] == "*")
+		    {
+			    result2 = int.MaxValue;
+		    }
+		    else if (!int.TryParse(x[1], out result2))
+		    {
+			    return ((string, NeededItem?))("Unable to parse quantity " + x[1] + ".", null);
+		    }
+            return (string.Empty, new NeededItem(result, result2));
+        }).ToList();
 		if (list.Count == 0)
 		{
 			return null;

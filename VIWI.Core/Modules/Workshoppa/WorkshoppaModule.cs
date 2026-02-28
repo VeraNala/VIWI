@@ -21,7 +21,7 @@ namespace VIWI.Modules.Workshoppa;
 internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig>
 {
     public const string ModuleName = "Workshoppa";
-    public const string ModuleVersion = "1.1.0";
+    public const string ModuleVersion = "1.1.1";
     public override string Name => ModuleName;
     public override string Version => ModuleVersion;
     public WorkshoppaConfig _configuration => ModuleConfig;
