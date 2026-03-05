@@ -1,5 +1,6 @@
 using Dalamud.Game.Command;
 using Dalamud.Hooking;
+using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
 using ECommons;
 using ECommons.Automation;
@@ -19,6 +20,7 @@ using System.Runtime.InteropServices;
 using VIWI.Core;
 using VIWI.Helpers;
 using VIWI.IPC;
+using VIWI.Modules.AutoLogin.Windows;
 using static FFXIVClientStructs.FFXIV.Client.UI.Misc.CharaView.Delegates;
 using static VIWI.Core.VIWIContext;
 
@@ -27,7 +29,7 @@ namespace VIWI.Modules.AutoLogin
     internal unsafe class AutoLoginModule : VIWIModuleBase<AutoLoginConfig>
     {
         public const string ModuleName = "AutoLogin";
-        public const string ModuleVersion = "1.3.0";
+        public const string ModuleVersion = "1.3.1";
         public override string Name => ModuleName;
         public override string Version => ModuleVersion;
         public AutoLoginConfig _configuration => ModuleConfig;
@@ -45,6 +47,9 @@ namespace VIWI.Modules.AutoLogin
 
         private readonly TaskManager taskManager = new();
         private readonly AutoRetainerIPC _autoRetainerIPC = new();
+        private QuickLaunchOverlay? _qlOverlay;
+        private bool _qlOverlayAdded;
+        private bool _autoLoginRunning;
         public const string RestartCommand = "/viwirestart";
 
         //internal IntPtr StartHandler;
@@ -72,15 +77,20 @@ namespace VIWI.Modules.AutoLogin
             Instance = this;
             base.Initialize(config);
 
+            _qlOverlay ??= new QuickLaunchOverlay();
+            CorePlugin.WindowSystem.AddWindow(_qlOverlay);
+            _qlOverlayAdded = true;
+            _qlOverlay.IsOpen = true;
+            PluginLog.Information($"[AutoLogin] QuickLaunchOverlay added. open={_qlOverlay.IsOpen} name={_qlOverlay.WindowName}");
+
             if (_configuration.Enabled)
                 Enable();
         }
-
         public override void Enable()
         {
             NoKill();
 
-            if (_configuration.ClientLaunchPath != null)
+            if (!string.IsNullOrWhiteSpace(_configuration.ClientLaunchPath))
             {
                 CommandManager.AddHandler(RestartCommand, new CommandInfo((cmd, args) =>
                 {
@@ -106,15 +116,15 @@ namespace VIWI.Modules.AutoLogin
 
         public override void Disable()
         {
+            _autoLoginRunning = false;
             Framework.Update -= OnFrameworkUpdate;
             ClientState.Login -= OnLogin;
             ClientState.Logout -= OnLogout;
             ClientState.TerritoryChanged -= TerritoryChange;
 
-            if (_configuration.ClientLaunchPath != null)
+            if (!string.IsNullOrWhiteSpace(_configuration.ClientLaunchPath))
             {
                 CommandManager.RemoveHandler(RestartCommand);
-                CheckRestartFlag();
             }
 
             taskManager.Abort();
@@ -122,6 +132,7 @@ namespace VIWI.Modules.AutoLogin
             LobbyErrorHandlerHook?.Dispose();
             LobbyErrorHandlerHook = null;
             noKillHookInitialized = false;
+            if (_qlOverlay != null) _qlOverlay.IsOpen = false;
         }
         public override void Dispose()
         {
@@ -260,15 +271,14 @@ namespace VIWI.Modules.AutoLogin
                 PluginLog.Warning("[AutoLogin] Lobby error detected (likely 2002). Switching to error clear + resume.");
 
                 taskManager.Abort();
+                taskManager.Enqueue(() => ClearDisconnectErrors(), "ClearDisconnectErrors");
                 if (_configuration.SkipAuthError == true && _configuration.ClientLaunchPath != null && _errorCounter >= 3)
                 {
 
                     PluginLog.Warning("[AutoLogin] Repeat Lobby errors detected, Assuming Auth Error and restarting Client.");
-                    _errorCounter = 0;
                     RequestClientRestart(_configuration.CurrentRegion);
                     return;
                 }
-                taskManager.Enqueue(() => ClearDisconnectErrors(), "ClearDisconnectErrors");
                 taskManager.Enqueue(() =>
                 {
                     if (IsLobbyErrorVisible()) return false;
@@ -313,10 +323,12 @@ namespace VIWI.Modules.AutoLogin
             taskManager.Enqueue(() => SelectServiceAccountIndex(index), "SelectServiceAccount");
             taskManager.Enqueue(() => SelectCharacter(chara, hWorld, cWorld, dc), "SelectCharacter");
             taskManager.Enqueue(() => ConfirmLogin(), "ConfirmLogin");
+            _autoLoginRunning = false;
         }
 
         public void StartAutoLogin()
         {
+            _autoLoginRunning = true;
             EnqueueLoginLoop(Snap);
         }
         #endregion
@@ -667,6 +679,7 @@ namespace VIWI.Modules.AutoLogin
             if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "SelectOk", out _)) return true;
             if (ClientState.IsLoggedIn)
             {
+                PluginLog.Debug("[AutoLogin] Successfully Logged In! Enjoy!");
                 _errorCounter = 0;
                 return true;
             }
@@ -763,6 +776,11 @@ namespace VIWI.Modules.AutoLogin
                 PluginLog.Warning("[AutoLogin] ClientLaunchPath is not configured; cannot restart client.");
                 return;
             }
+            if (_shutdownRetry > 0)
+            {
+                KillClient();
+                return;
+            }
 
             if ((DateTime.Now - _lastRestartRequest).TotalSeconds < 5)
                 return;
@@ -805,7 +823,6 @@ namespace VIWI.Modules.AutoLogin
                 return;
             }
 
-            _shutdownRetry = 0;
             taskManager.Abort();
             _inErrorRecovery = false;
             _pendingLoginCommands = false;
@@ -814,8 +831,6 @@ namespace VIWI.Modules.AutoLogin
 
         private void KillClient()
         {
-            _shutdownRetry = 0;
-
             taskManager.EnqueueDelay(200);
             taskManager.Enqueue(() =>
             {
@@ -829,9 +844,7 @@ namespace VIWI.Modules.AutoLogin
             taskManager.EnqueueDelay(200);
             taskManager.Enqueue(() =>
             {
-                if (ClientState.IsLoggedIn)
-                    CommandManager.ProcessCommand("/shutdown");
-
+                CommandManager.ProcessCommand("/shutdown");
                 _shutdownRetry++;
 
                 return true;
@@ -932,6 +945,56 @@ namespace VIWI.Modules.AutoLogin
                 return LoginRegion.JP;
 
             return LoginRegion.Unknown;
+        }
+        public bool IsBusyForQuickLaunch()
+        {
+            return taskManager.IsBusy || _inErrorRecovery;
+        }
+        public void QuickLaunchToRegion(LoginRegion region)
+        {
+            if (!_configuration.Enabled)
+                return;
+
+            if (!_configuration.LastByRegion.TryGetValue(region, out var snap) || snap == null || !snap.HasMinimumIdentity)
+            {
+                PluginLog.Warning($"[AutoLogin] QuickLaunch: no saved snapshot for {region}.");
+                return;
+            }
+
+            _configuration.Current = new LoginSnapshot
+            {
+                CharacterName = snap.CharacterName,
+                HomeWorldName = snap.HomeWorldName,
+                DataCenterID = snap.DataCenterID,
+                DataCenterName = snap.DataCenterName,
+                Visiting = snap.Visiting,
+                CurrentWorldName = snap.CurrentWorldName,
+                vDataCenterID = snap.vDataCenterID,
+                vDataCenterName = snap.vDataCenterName,
+            };
+
+            _configuration.CurrentRegion = region;
+
+            SaveConfig();
+
+            PluginLog.Information($"[AutoLogin] QuickLaunch -> {region}: {_configuration.Current.CharacterName}@{_configuration.Current.HomeWorldName}");
+
+            taskManager.Abort();
+            StartAutoLogin();
+        }
+        public bool IsAutoLoginRunning => _autoLoginRunning || taskManager.IsBusy || _inErrorRecovery;
+
+        public void StopAutoLogin()
+        {
+            PluginLog.Information("[AutoLogin] Manual stop requested.");
+
+            taskManager.Abort();
+
+            _autoLoginRunning = false;
+            _inErrorRecovery = false;
+            _pendingLoginCommands = false;
+
+            _errorCounter = 0;
         }
         #endregion
     }
