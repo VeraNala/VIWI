@@ -54,7 +54,7 @@ namespace VIWI.Modules.AutoLogin.Windows
 
             var module = AutoLoginModule.Instance;
             var config = module?._configuration;
-            if (module == null || config == null)
+            if (module == null || config == null || !config.QuickLaunchEnabled)
                 return;
 
             SizeConstraints = new WindowSizeConstraints
@@ -87,9 +87,9 @@ namespace VIWI.Modules.AutoLogin.Windows
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted(title);
 
-            ImGuiHelpers.ScaledDummy(3);
+            ImGuiHelpers.ScaledDummy(1);
             ImGui.Separator();
-            ImGuiHelpers.ScaledDummy(3);
+            ImGuiHelpers.ScaledDummy(2);
 
             if (module.IsAutoLoginRunning)
             {
@@ -171,22 +171,28 @@ namespace VIWI.Modules.AutoLogin.Windows
             }
             bool canRestart = config.SkipAuthError && !string.IsNullOrWhiteSpace(config.ClientLaunchPath);
             bool ctrlHeld = ImGui.GetIO().KeyCtrl;
-            float w = ImGui.GetContentRegionAvail().X;
-            float h = ImGui.GetFrameHeight() * 1.15f;
+
             if (canRestart)
             {
+                ImGuiHelpers.ScaledDummy(2);
+
+                float h = ImGui.GetFrameHeight() * 1.15f;
+
+                float wAvail = ImGui.GetContentRegionAvail().X;
+                float maxRestartWidth = 320f * ImGuiHelpers.GlobalScale;
+                float wBtn = Math.Min(wAvail, maxRestartWidth);
+                float x0 = ImGui.GetCursorPosX();
+                ImGui.SetCursorPosX(x0 + Math.Max(0, (wAvail - wBtn) * 0.5f));
+
                 using (ImRaii.Disabled(!ctrlHeld))
                 {
-                    if (ImGui.Button("Restart Client", new Vector2(w, h)))
-                    {
+                    if (ImGui.Button("Restart Client", new Vector2(wBtn, h)))
                         module.RequestClientRestart(config.CurrentRegion);
-                    }
                 }
+                ImGui.SetCursorPosX(x0);
 
                 if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                {
                     ImGui.SetTooltip("Hold CTRL while clicking to restart the client.");
-                }
             }
         }
         private static string GetRegionShort(LoginRegion region)

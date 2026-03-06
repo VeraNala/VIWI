@@ -108,7 +108,14 @@ namespace VIWI.UI.Pages
             DrawRegionRow(config, LoginRegion.OCE);
             DrawRegionRow(config, LoginRegion.JP);
 
-            ImGuiHelpers.ScaledDummy(4f);
+            bool ql = config.QuickLaunchEnabled;
+            if (ImGui.Checkbox("Enable QuickLaunch Menu (Title Screen)", ref ql))
+            {
+                config.QuickLaunchEnabled = ql;
+                module?.SaveConfig();
+            }
+
+            ImGuiHelpers.ScaledDummy(2f);
             if (config.RestartingClient || config.PendingRestartRegion != LoginRegion.Unknown)
             {
                 ImGui.TextUnformatted($"Restart State: RestartingClient={config.RestartingClient}, PendingRegion={config.PendingRestartRegion}");
@@ -117,9 +124,9 @@ namespace VIWI.UI.Pages
             // ----------------------------
             // Restart on Auth Error + Launch Settings
             // ----------------------------
-            ImGuiHelpers.ScaledDummy(8f);
+            ImGuiHelpers.ScaledDummy(2f);
             ImGui.Separator();
-            ImGuiHelpers.ScaledDummy(8f);
+            ImGuiHelpers.ScaledDummy(4f);
 
             bool skipAuth = config.SkipAuthError;
             if (ImGui.Checkbox("Restart on Auth Error", ref skipAuth))

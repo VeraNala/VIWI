@@ -46,7 +46,6 @@ namespace VIWI.Modules.AutoLogin
 
         public bool RestartingClient { get; set; } = false;
         public LoginRegion PendingRestartRegion { get; set; } = LoginRegion.Unknown;
-
         public LoginRegion CurrentRegion { get; set; } = LoginRegion.Unknown;
         public int DCsRecovered { get; set; } = 0;
         public int AuthsRecovered { get; set; } = 0;
@@ -54,6 +53,7 @@ namespace VIWI.Modules.AutoLogin
         public bool RunLoginCommands = false;
         public bool ARActiveSkipLoginCommands = true;
         public List<string> LoginCommands = [];
+        public bool QuickLaunchEnabled { get; set; } = true;
 
         public string ClientLaunchPath { get; set; } = string.Empty;
         public string ClientLaunchArgs { get; set; } = string.Empty;

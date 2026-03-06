@@ -77,19 +77,15 @@ namespace VIWI.UI.Pages
             ImGuiHelpers.ScaledDummy(8f);
 
             DrawQuickStatus(module);
-            ImGuiHelpers.ScaledDummy(8f);
-            ImGui.Separator();
-            ImGuiHelpers.ScaledDummy(8f);
+            ImGuiHelpers.ScaledDummy(2f);
 
-            DrawPerCharacterSection(config, module);
-            ImGuiHelpers.ScaledDummy(8f);
             ImGui.Separator();
-            ImGuiHelpers.ScaledDummy(8f);
-
+            ImGuiHelpers.ScaledDummy(4f);
             DrawWeaponIconsSection(config, module);
-            ImGuiHelpers.ScaledDummy(8f);
+            ImGuiHelpers.ScaledDummy(2f);
+            DrawPerCharacterSection(config, module);
+            ImGuiHelpers.ScaledDummy(4f);
             ImGui.Separator();
-            ImGuiHelpers.ScaledDummy(8f);
 
             DrawCommandsCheatsheet();
         }
@@ -129,16 +125,18 @@ namespace VIWI.UI.Pages
 
         private void DrawPerCharacterSection(KitchenSinkConfig config, KitchenSinkModule module)
         {
-            ImGui.TextUnformatted("Per-character settings");
+            if (!ImGui.CollapsingHeader("Per-character settings", ImGuiTreeNodeFlags.DefaultOpen))
+                return;
+
             ImGuiComponents.HelpMarker(
                 "KitchenSink stores some options per character (by LocalContentId).\n" +
                 "If you don't see your character here, log in once so KitchenSink can capture it."
             );
 
-            ImGuiHelpers.ScaledDummy(4f);
+            ImGuiHelpers.ScaledDummy(2f);
 
             ImGui.SetNextItemWidth(-1);
-            ImGui.InputTextWithHint("##ks_char_search", "Filter characters (name/world/cid)", ref _charSearch, 128);
+            ImGui.InputTextWithHint("##ks_char_search", "Filter characters (name/world)", ref _charSearch, 128);
 
             var chars = config.Characters ?? new List<KitchenSinkConfig.CharacterData>();
             if (chars.Count == 0)
@@ -150,37 +148,119 @@ namespace VIWI.UI.Pages
             RefreshNameCacheIfNeeded(chars, module);
 
             var filter = _charSearch?.Trim();
-            var filtered = string.IsNullOrWhiteSpace(filter) ? chars : chars.Where(x =>
-                {
-                    var cidStr = x.LocalContentId.ToString();
-                    if (_nameByCid.TryGetValue(x.LocalContentId, out var nw))
-                    {
-                        var blob = $"{nw.Name}@{nw.World} {cidStr}";
-                        return blob.Contains(filter!, StringComparison.OrdinalIgnoreCase);
-                    }
-                    return cidStr.Contains(filter!, StringComparison.OrdinalIgnoreCase);
-                }).ToList();
+            var rows = new List<(KitchenSinkConfig.CharacterData Data, string Name, string World)>(chars.Count);
 
-            if (filtered.Count == 0)
+            foreach (var c in chars)
+            {
+                var cid = c.LocalContentId;
+
+                if (!_nameByCid.TryGetValue(cid, out var nw))
+                    continue;
+
+                if (string.IsNullOrWhiteSpace(nw.Name) || string.IsNullOrWhiteSpace(nw.World))
+                    continue;
+
+                string name = nw.Name.Trim();
+                string world = nw.World.Trim();
+
+                if (!string.IsNullOrWhiteSpace(filter))
+                {
+                    var blob = $"{name}@{world}";
+                    if (!blob.Contains(filter!, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                }
+
+                rows.Add((c, name, world));
+            }
+
+            if (rows.Count == 0)
             {
                 ImGui.TextDisabled("No matches.");
                 return;
             }
 
-            foreach (var c in filtered)
+            rows = rows
+                .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(r => r.World, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            ImGuiHelpers.ScaledDummy(2f);
+
+            const ImGuiTableFlags flags =
+                ImGuiTableFlags.RowBg |
+                ImGuiTableFlags.BordersInnerH |
+                ImGuiTableFlags.BordersInnerV |
+                ImGuiTableFlags.SizingStretchProp |
+                ImGuiTableFlags.NoSavedSettings;
+
+            if (!ImGui.BeginTable("##ks_perchar_table", 3, flags))
+                return;
+
+            // Columns:
+            // 0: Character
+            // 1: Leves
+            // 2: Delete
+            ImGui.TableSetupColumn("Character", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("##leves", ImGuiTableColumnFlags.WidthFixed, 60f * ImGuiHelpers.GlobalScale);
+            ImGui.TableSetupColumn("##delete", ImGuiTableColumnFlags.WidthFixed, 36f * ImGuiHelpers.GlobalScale);
+            ImGui.TableHeadersRow();
+
+            ImGui.TableSetColumnIndex(1);
+
+            float columnWidth = ImGui.GetColumnWidth();
+            float iconWidth = ImGui.CalcTextSize($"{(char)FontAwesomeIcon.ClipboardList}").X;
+
+            float offset = (columnWidth - iconWidth) * 0.5f;
+
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + offset);
+
+            ImGui.PushFont(UiBuilder.IconFont);
+            ImGui.TextUnformatted($"{(char)FontAwesomeIcon.ClipboardList}");
+            ImGui.PopFont();
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Warn character about Leve Allowances on Login");
+
+            for (int i = 0; i < rows.Count; i++)
             {
+                var (c, name, world) = rows[i];
                 var cid = c.LocalContentId;
+
                 ImGui.PushID((int)(cid % int.MaxValue));
 
-                string header = _nameByCid.TryGetValue(cid, out var nw) ? $"{nw.Name}@{nw.World}  (CID: {cid})" : $"CID: {cid}";
-                bool open = ImGui.CollapsingHeader(header, ImGuiTreeNodeFlags.DefaultOpen | ImGuiTreeNodeFlags.AllowItemOverlap);
+                ImGui.TableNextRow();
 
-                ImGui.SetItemAllowOverlap();
+                // --- Character column ---
+                ImGui.TableSetColumnIndex(0);
+                ImGui.TextUnformatted(name);
+                ImGui.SameLine();
+                ImGui.TextDisabled($"@{world}");
+
+                // --- Leves column ---
+                ImGui.TableSetColumnIndex(1);
+                bool warnLeves = c.WarnAboutLeves;
+
+                var cellMin = ImGui.GetCursorScreenPos();
+                float cellW = ImGui.GetContentRegionAvail().X;
+                float cb = ImGui.GetFrameHeight();
+                ImGui.SetCursorScreenPos(new Vector2(cellMin.X + (cellW - cb) * 0.5f, cellMin.Y));
+
+                if (ImGui.Checkbox("##warn_leves", ref warnLeves))
+                {
+                    c.WarnAboutLeves = warnLeves;
+                    module.SaveConfig();
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Warn character about Leve Allowances on Login");
+
+                // --- Delete column ---
+                ImGui.TableSetColumnIndex(2);
+
+                var dMin = ImGui.GetCursorScreenPos();
+                float dW = ImGui.GetContentRegionAvail().X;
                 float iconSize = ImGui.GetFrameHeight();
-                var rMin = ImGui.GetItemRectMin();
-                var rMax = ImGui.GetItemRectMax();
+                ImGui.SetCursorScreenPos(new Vector2(dMin.X + (dW - iconSize) * 0.5f, dMin.Y));
 
-                ImGui.SetCursorScreenPos(new Vector2(rMax.X - iconSize - 6f, rMin.Y + (rMax.Y - rMin.Y - iconSize) * 0.5f));
                 ImGui.PushStyleColor(ImGuiCol.Button, 0x66000000);
                 ImGui.PushStyleColor(ImGuiCol.ButtonHovered, 0x88FFFFFF);
                 ImGui.PushStyleColor(ImGuiCol.ButtonActive, 0xAAFFFFFF);
@@ -193,6 +273,7 @@ namespace VIWI.UI.Pages
 
                     ImGui.PopStyleColor(3);
                     ImGui.PopID();
+
                     break;
                 }
 
@@ -201,21 +282,10 @@ namespace VIWI.UI.Pages
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip("Delete this character entry from KitchenSink");
 
-                ImGui.SetCursorScreenPos(new Vector2(rMin.X, rMax.Y + ImGui.GetStyle().ItemSpacing.Y));
-
-                if (open)
-                {
-                    bool warnLeves = c.WarnAboutLeves;
-                    if (ImGui.Checkbox("Warn about Leve allowances on login", ref warnLeves))
-                    {
-                        c.WarnAboutLeves = warnLeves;
-                        module.SaveConfig();
-                    }
-                }
-
                 ImGui.PopID();
-
             }
+
+            ImGui.EndTable();
         }
 
         private void RefreshNameCacheIfNeeded(List<KitchenSinkConfig.CharacterData> chars, KitchenSinkModule module)
@@ -264,13 +334,6 @@ namespace VIWI.UI.Pages
             }
             ImGuiComponents.HelpMarker("Draws job/role icons over Armoury Board item slots.");
 
-            bool requireCtrl = config.WeaponIconsRequireCtrl;
-            if (ImGui.Checkbox("Require Ctrl key", ref requireCtrl))
-            {
-                config.WeaponIconsRequireCtrl = requireCtrl;
-                module.SaveConfig();
-            }
-            ImGuiComponents.HelpMarker("When enabled, overlay only appears while holding Ctrl.");
             bool mini = config.WeaponIconsMiniMode;
             if (ImGui.Checkbox("Mini mode (bottom-left icons)", ref mini))
             {
@@ -278,6 +341,15 @@ namespace VIWI.UI.Pages
                 module.SaveConfig();
             }
             ImGuiComponents.HelpMarker("Draws smaller icons anchored to the bottom-left of each Armoury slot.");
+
+            bool requireCtrl = config.WeaponIconsRequireCtrl;
+            if (ImGui.Checkbox("Require Ctrl key", ref requireCtrl))
+            {
+                config.WeaponIconsRequireCtrl = requireCtrl;
+                module.SaveConfig();
+            }
+            ImGuiComponents.HelpMarker("When enabled, overlay only appears while holding Ctrl.");
+
         }
         private static void DrawCommandsCheatsheet()
         {

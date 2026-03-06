@@ -9,15 +9,17 @@ using FFXIVClientStructs.FFXIV.Component.GUI;
 using Lumina.Excel.Sheets;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 namespace VIWI.Modules.KitchenSink.Commands;
 
 public sealed unsafe class WeaponIcons : IDisposable
 {
-    public float OverlayOffsetX { get; set; } = 74f;
-    public float OverlayOffsetY { get; set; } = 112f;
+    public float OverlayOffsetX { get; set; } = 0f;
+    public float OverlayOffsetY { get; set; } = 0f;
 
     private static class BaseColors
     {
@@ -92,6 +94,8 @@ public sealed unsafe class WeaponIcons : IDisposable
     private readonly Dictionary<uint, CachedLookup> _cachedItemIcons = new();
 
     private bool _built;
+    private Vector2 _nonClientOffset = Vector2.Zero;
+    private DateTime _nextNonClientUpdate = DateTime.MinValue;
 
     public WeaponIcons(
         IGameGui gameGui,
@@ -136,26 +140,17 @@ public sealed unsafe class WeaponIcons : IDisposable
                 return;
             }
         }
+        UpdateNonClientOffset();
 
-        DrawOverlay(dl =>
-        {
-            try
-            {
-                DrawArmouryOverlay(dl);
-            }
-            catch (Exception ex)
-            {
-                _log.Error(ex, "[WeaponIcons] DrawArmouryOverlay failed");
-            }
-        });
+        DrawOverlay(dl => DrawArmouryOverlay(dl));
     }
 
     private static void DrawOverlay(Action<ImDrawListPtr> draw)
     {
         var vp = ImGui.GetMainViewport();
 
-        ImGui.SetNextWindowPos(vp.Pos);
-        ImGui.SetNextWindowSize(vp.Size);
+        ImGui.SetNextWindowPos(Vector2.Zero);
+        ImGui.SetNextWindowSize(ImGui.GetIO().DisplaySize);
         ImGui.SetNextWindowViewport(vp.ID);
 
         const ImGuiWindowFlags flags =
@@ -203,12 +198,6 @@ public sealed unsafe class WeaponIcons : IDisposable
         if (sorter == null)
             return;
 
-        var addonPos = new Vector2(unitBase->X, unitBase->Y);
-        float s = unitBase->Scale;
-
-        float offX = OverlayOffsetX * s;
-        float offY = OverlayOffsetY * s;
-
         int count = (int)sorter.Value->Items.Count;
 
         for (int i = 0; i < count; i++)
@@ -224,16 +213,24 @@ public sealed unsafe class WeaponIcons : IDisposable
 
             var res = &node->AtkResNode;
 
-            float w = res->Width * s;
-            float h = res->Height * s;
+            GetNodeScreenRect_FromUnitBaseRootRelative(unitBase, res, out var p0, out var p1);
+
+            var nc = _nonClientOffset;
+
+            p0 += new Vector2(0, nc.Y);
+            p1 += new Vector2(0, nc.Y);
+
+            if (OverlayOffsetX != 0f || OverlayOffsetY != 0f)
+            {
+                var nudge = new Vector2(OverlayOffsetX, OverlayOffsetY);
+                p0 += nudge;
+                p1 += nudge;
+            }
+
+            float w = p1.X - p0.X;
+            float h = p1.Y - p0.Y;
             if (w <= 0 || h <= 0)
                 continue;
-
-            float x = addonPos.X + (res->X * s) + offX;
-            float y = addonPos.Y + (res->Y * s) + offY;
-
-            var p0 = new Vector2(x, y);
-            var p1 = new Vector2(x + w, y + h);
 
             var lookup = FindIconForItem(invItem->ItemId);
             var tex = lookup.GetTexture(_textureProvider);
@@ -254,12 +251,7 @@ public sealed unsafe class WeaponIcons : IDisposable
             else
             {
                 float mini = MathF.Floor(MathF.Min(w, h) * 0.5f);
-
-                iconP0 = new Vector2(
-                    p0.X,
-                    p1.Y - mini
-                );
-
+                iconP0 = new Vector2(p0.X, p1.Y - mini);
                 iconP1 = iconP0 + new Vector2(mini, mini);
             }
 
@@ -273,9 +265,11 @@ public sealed unsafe class WeaponIcons : IDisposable
             {
                 draw.AddImage(img, iconP0, iconP1);
             }
+
+            // Debug Boxes:
+            // draw.AddRect(p0, p1, 0xFF00FFFF, 0f, ImDrawFlags.None, 2f);
         }
     }
-
 
     private CachedLookup FindIconForItem(uint itemId)
     {
@@ -503,6 +497,8 @@ public sealed unsafe class WeaponIcons : IDisposable
         abbr.Equals("NIN", StringComparison.OrdinalIgnoreCase) ||
         abbr.Equals("VPR", StringComparison.OrdinalIgnoreCase);
 
+    // ---- Icon lookup types ----
+
     private abstract record CachedLookup(uint CategoryId, List<string> Jobs)
     {
         public abstract ISharedImmediateTexture? GetTexture(ITextureProvider textureProvider);
@@ -526,6 +522,116 @@ public sealed unsafe class WeaponIcons : IDisposable
     {
         public override ISharedImmediateTexture GetTexture(ITextureProvider textureProvider) =>
             textureProvider.GetFromGame(TexturePath);
+    }
+
+
+    private static void GetNodePosAndScale_UntilRoot(
+        AtkResNode* node,
+        AtkResNode* stopAtRoot,
+        out float x, out float y,
+        out float sx, out float sy)
+    {
+        x = node->X;
+        y = node->Y;
+        sx = node->ScaleX;
+        sy = node->ScaleY;
+
+        var p = node->ParentNode;
+        while (p != null && p != stopAtRoot)
+        {
+            x = p->X + x * p->ScaleX;
+            y = p->Y + y * p->ScaleY;
+
+            sx *= p->ScaleX;
+            sy *= p->ScaleY;
+
+            p = p->ParentNode;
+        }
+
+        if (p == stopAtRoot && stopAtRoot != null)
+        {
+            x *= stopAtRoot->ScaleX;
+            y *= stopAtRoot->ScaleY;
+
+            sx *= stopAtRoot->ScaleX;
+            sy *= stopAtRoot->ScaleY;
+        }
+    }
+
+    private static void GetNodeScreenRect_FromUnitBaseRootRelative(
+        AtkUnitBase* unitBase,
+        AtkResNode* node,
+        out Vector2 p0,
+        out Vector2 p1)
+    {
+        var root = unitBase->RootNode;
+        if (root == null)
+        {
+            float x = unitBase->X + node->X;
+            float y = unitBase->Y + node->Y;
+            float w = node->Width * node->ScaleX;
+            float h = node->Height * node->ScaleY;
+
+            p0 = new Vector2(x, y);
+            p1 = new Vector2(x + w, y + h);
+            return;
+        }
+
+        GetNodePosAndScale_UntilRoot(node, root, out var xRel, out var yRel, out var sx, out var sy);
+
+        float screenX = unitBase->X + xRel;
+        float screenY = unitBase->Y + yRel;
+
+        float w2 = node->Width * sx;
+        float h2 = node->Height * sy;
+
+        p0 = new Vector2(screenX, screenY);
+        p1 = new Vector2(screenX + w2, screenY + h2);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(nint hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    private static extern bool ClientToScreen(nint hWnd, ref POINT lpPoint);
+
+    private static Vector2 GetNonClientOffset()
+    {
+        var hwnd = Process.GetCurrentProcess().MainWindowHandle;
+        if (hwnd == nint.Zero)
+            return Vector2.Zero;
+
+        if (!GetWindowRect(hwnd, out var wr))
+            return Vector2.Zero;
+
+        var pt = new POINT { X = 0, Y = 0 };
+        if (!ClientToScreen(hwnd, ref pt))
+            return Vector2.Zero;
+
+        return new Vector2(pt.X - wr.Left, pt.Y - wr.Top);
+    }
+
+    private void UpdateNonClientOffset()
+    {
+        if (DateTime.UtcNow < _nextNonClientUpdate)
+            return;
+
+        _nextNonClientUpdate = DateTime.UtcNow.AddMilliseconds(250);
+
+        try
+        {
+            _nonClientOffset = GetNonClientOffset();
+        }
+        catch
+        {
+            _nonClientOffset = Vector2.Zero;
+        }
     }
 }
 

@@ -78,10 +78,12 @@ namespace VIWI.Modules.AutoLogin
             base.Initialize(config);
 
             _qlOverlay ??= new QuickLaunchOverlay();
-            CorePlugin.WindowSystem.AddWindow(_qlOverlay);
-            _qlOverlayAdded = true;
-            _qlOverlay.IsOpen = true;
-            PluginLog.Information($"[AutoLogin] QuickLaunchOverlay added. open={_qlOverlay.IsOpen} name={_qlOverlay.WindowName}");
+            if (!_qlOverlayAdded)
+            {
+                CorePlugin.WindowSystem.AddWindow(_qlOverlay);
+                _qlOverlayAdded = true;
+            }
+            _qlOverlay.IsOpen = _configuration.Enabled;
 
             if (_configuration.Enabled)
                 Enable();
@@ -108,6 +110,7 @@ namespace VIWI.Modules.AutoLogin
                 CheckRestartFlag();
             }
             UpdateConfig();
+            if (_qlOverlay != null) _qlOverlay.IsOpen = true;
             Framework.Update += OnFrameworkUpdate;
             ClientState.Login += OnLogin;
             ClientState.Logout += OnLogout;
@@ -126,7 +129,6 @@ namespace VIWI.Modules.AutoLogin
             {
                 CommandManager.RemoveHandler(RestartCommand);
             }
-
             taskManager.Abort();
             LobbyErrorHandlerHook?.Disable();
             LobbyErrorHandlerHook?.Dispose();

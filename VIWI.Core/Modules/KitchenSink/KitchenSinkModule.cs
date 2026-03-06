@@ -9,7 +9,7 @@ namespace VIWI.Modules.KitchenSink
     public sealed class KitchenSinkModule : VIWIModuleBase<KitchenSinkConfig>
     {
         public const string ModuleName = "KitchenSink";
-        public const string ModuleVersion = "1.0.2";
+        public const string ModuleVersion = "1.1.0";
         public override string Name => ModuleName;
         public override string Version => ModuleVersion;
         public KitchenSinkConfig _configuration => ModuleConfig;
@@ -102,7 +102,7 @@ namespace VIWI.Modules.KitchenSink
                 _configuration);
             if (_configuration.WeaponIconsEnabled)
             {
-                //PluginInterface.UiBuilder.Draw += _weaponIcons.Draw;
+                PluginInterface.UiBuilder.Draw += _weaponIcons.Draw;
             }
             PluginInterface.UiBuilder.Draw += _windowSystem.Draw;
 
