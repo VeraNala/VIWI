@@ -46,16 +46,27 @@ namespace VIWI.Modules.AutoLogin.Windows
             ImGui.PopStyleColor();
             ImGui.PopStyleVar(2);
         }
-        public override bool DrawConditions() => IsOnTitleOrLoginScreens();
+        public override bool DrawConditions()
+        {
+            var module = AutoLoginModule.Instance;
+            var config = module?._configuration;
+            if (module == null || config == null || !config.QuickLaunchEnabled)
+                return false;
+            else
+            {
+                IsOnTitleOrLoginScreens();
+                return true;
+            }
+        }
 
         public override void Draw()
         {
-            _buttonWidth = 0f;
-
             var module = AutoLoginModule.Instance;
             var config = module?._configuration;
             if (module == null || config == null || !config.QuickLaunchEnabled)
                 return;
+
+            _buttonWidth = 0f;
 
             SizeConstraints = new WindowSizeConstraints
             {

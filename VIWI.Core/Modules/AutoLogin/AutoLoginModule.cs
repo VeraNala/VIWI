@@ -48,7 +48,6 @@ namespace VIWI.Modules.AutoLogin
         private readonly TaskManager taskManager = new();
         private readonly AutoRetainerIPC _autoRetainerIPC = new();
         private QuickLaunchOverlay? _qlOverlay;
-        private bool _qlOverlayAdded;
         private bool _autoLoginRunning;
         public const string RestartCommand = "/viwirestart";
 
@@ -77,13 +76,12 @@ namespace VIWI.Modules.AutoLogin
             Instance = this;
             base.Initialize(config);
 
-            _qlOverlay ??= new QuickLaunchOverlay();
-            if (!_qlOverlayAdded)
+            if (_qlOverlay == null)
             {
+                _qlOverlay ??= new QuickLaunchOverlay();
                 CorePlugin.WindowSystem.AddWindow(_qlOverlay);
-                _qlOverlayAdded = true;
             }
-            _qlOverlay.IsOpen = _configuration.Enabled;
+            _qlOverlay?.IsOpen = _configuration.QuickLaunchEnabled;
 
             if (_configuration.Enabled)
                 Enable();
@@ -110,7 +108,6 @@ namespace VIWI.Modules.AutoLogin
                 CheckRestartFlag();
             }
             UpdateConfig();
-            if (_qlOverlay != null) _qlOverlay.IsOpen = true;
             Framework.Update += OnFrameworkUpdate;
             ClientState.Login += OnLogin;
             ClientState.Logout += OnLogout;
@@ -262,6 +259,8 @@ namespace VIWI.Modules.AutoLogin
         private void OnFrameworkUpdate(IFramework _)
         {
             if (!_configuration.Enabled) return;
+
+            if (_qlOverlay != null && _configuration.QuickLaunchEnabled) _qlOverlay.IsOpen = true;
 
             var errorVisible = IsLobbyErrorVisible();
 

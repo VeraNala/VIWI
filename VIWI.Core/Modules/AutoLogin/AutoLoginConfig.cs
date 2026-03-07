@@ -53,7 +53,7 @@ namespace VIWI.Modules.AutoLogin
         public bool RunLoginCommands = false;
         public bool ARActiveSkipLoginCommands = true;
         public List<string> LoginCommands = [];
-        public bool QuickLaunchEnabled { get; set; } = true;
+        public bool QuickLaunchEnabled { get; set; } = false;
 
         public string ClientLaunchPath { get; set; } = string.Empty;
         public string ClientLaunchArgs { get; set; } = string.Empty;
