@@ -57,5 +57,7 @@ namespace VIWI.Modules.AutoLogin
 
         public string ClientLaunchPath { get; set; } = string.Empty;
         public string ClientLaunchArgs { get; set; } = string.Empty;
+        public bool LoginOnLaunch { get; set; } = false;
+        public bool LoginOnRestart { get; set; } = false;
     }
 }

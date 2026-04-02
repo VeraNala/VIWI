@@ -114,6 +114,12 @@ namespace VIWI.UI.Pages
                 config.QuickLaunchEnabled = ql;
                 module?.SaveConfig();
             }
+            bool lol = config.LoginOnLaunch;
+            if (ImGui.Checkbox("Login On Game Launch", ref lol))
+            {
+                config.LoginOnLaunch = lol;
+                module?.SaveConfig();
+            }
 
             ImGuiHelpers.ScaledDummy(2f);
             if (config.RestartingClient || config.PendingRestartRegion != LoginRegion.Unknown)
@@ -157,6 +163,15 @@ namespace VIWI.UI.Pages
             }
             ImGui.SameLine();
             ImGuiComponents.HelpMarker("Launches a new client using your settings, and kills this one - resetting your Auth Token.");
+            using (ImRaii.Disabled(!canRestart))
+            {
+                bool lor = config.LoginOnRestart;
+                if (ImGui.Checkbox("Login On Auth Relaunch", ref lor))
+                {
+                    config.LoginOnRestart = lor;
+                    module?.SaveConfig();
+                }
+            }
 
             if (!_buffersInitialized)
             {

@@ -66,6 +66,7 @@ namespace VIWI.Modules.AutoLogin
         private int _errorCounter;
         private bool _disconnected;
         private bool _pendingLoginCommands;
+        private bool _restartInProgress;
 
 
         // ----------------------------
@@ -83,6 +84,10 @@ namespace VIWI.Modules.AutoLogin
             }
             _qlOverlay?.IsOpen = _configuration.QuickLaunchEnabled;
 
+            if (QuickLaunchOverlay.IsOnTitleOrLoginScreens() && ModuleConfig.LoginOnLaunch)
+            {
+                EnqueueLoginLoop(Snap);
+            }
             if (_configuration.Enabled)
                 Enable();
         }
@@ -184,6 +189,7 @@ namespace VIWI.Modules.AutoLogin
         private void OnLogout(int type, int code)
         {
             if (!_configuration.Enabled) return;
+            if (_restartInProgress) return;
 
             _pendingLoginCommands = false;
 
@@ -260,7 +266,10 @@ namespace VIWI.Modules.AutoLogin
         {
             if (!_configuration.Enabled) return;
 
-            if (_qlOverlay != null && _configuration.QuickLaunchEnabled) _qlOverlay.IsOpen = true;
+            if (_restartInProgress) return;
+
+            if (_qlOverlay != null)
+                _qlOverlay.IsOpen = _configuration.QuickLaunchEnabled && QuickLaunchOverlay.IsOnTitleOrLoginScreens();
 
             var errorVisible = IsLobbyErrorVisible();
 
@@ -440,7 +449,7 @@ namespace VIWI.Modules.AutoLogin
             {
                 var menu = new AddonMaster._TitleMenu((void*)titleMenuAddon);
 
-                if (menu.IsReady && EzThrottler.Throttle("TitleMenuThrottle", 100))
+                if (menu.IsReady && EzThrottler.Throttle("AutoLogin.TitleMenuThrottle", 100))
                 {
                     PluginLog.Information("[AutoLogin] Title Screen => Starting Login Process");
                     menu.DataCenter();
@@ -490,7 +499,7 @@ namespace VIWI.Modules.AutoLogin
                 }
 
                 var m = new AddonMaster.TitleDCWorldMap((void*)dcMenuAddon);
-                if (EzThrottler.Throttle("SelectDCThrottle", 100))
+                if (EzThrottler.Throttle("AutoLogin.SelectDCThrottle", 100))
                 {
                     PluginLog.Information($"[AutoLogin] Selecting Data Center index {targetDc}");
                     m.Select(targetDc);
@@ -641,17 +650,30 @@ namespace VIWI.Modules.AutoLogin
             if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "SelectYesno", out _) || AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "SelectOk", out _))
                 return true;
 
-            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "_CharaSelectListMenu", out var charMenuAddon) && GenericHelpers.IsAddonReady(charMenuAddon))
+            var worldSheet = DataManager.GetExcelSheet<World>();
+            var currWorldRow = worldSheet?.FirstOrDefault(row => row.Name.ExtractText().Equals(currWorld, StringComparison.Ordinal));
+
+            int currDc = currWorldRow != null ? (int)currWorldRow.Value.DataCenter.RowId : dc;
+            bool sameDc = currDc == dc;
+            string targetWorld = sameDc ? homeWorld : currWorld;
+
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "_CharaSelectWorldServer", out var worldServerAddon) && GenericHelpers.IsAddonReady(worldServerAddon) && worldServerAddon->IsVisible)
+            {
+                if (SelectWorldFromWorldServerMenu(targetWorld))
+                {
+                    PluginLog.Information($"[AutoLogin] Selected target world {targetWorld}.");
+                    return false;
+                }
+
+                PluginLog.Warning($"[AutoLogin] Target world {targetWorld} was not found.");
+                return false;
+            }
+
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "_CharaSelectListMenu", out var charMenuAddon) &&
+                GenericHelpers.IsAddonReady(charMenuAddon))
             {
                 var menu = new AddonMaster._CharaSelectListMenu((void*)charMenuAddon);
-                var worldSheet = DataManager.GetExcelSheet<World>();
-                var currWorldRow = worldSheet?
-                    .FirstOrDefault(row =>
-                        row.Name.ExtractText().Equals(currWorld, StringComparison.Ordinal));
 
-                int currDc = currWorldRow != null ? (int)currWorldRow.Value.DataCenter.RowId : dc; 
-                bool sameDc = currDc == dc;
-                string targetWorld = sameDc ? homeWorld : currWorld;
                 foreach (var c in menu.Characters)
                 {
                     if (!string.Equals(c.Name, name, StringComparison.Ordinal))
@@ -660,17 +682,80 @@ namespace VIWI.Modules.AutoLogin
                     var cHome = ExcelWorldHelper.GetName(c.HomeWorld);
                     var cCurr = ExcelWorldHelper.GetName(c.CurrentWorld);
 
-                    if (!string.Equals(targetWorld, cHome, StringComparison.Ordinal) && !string.Equals(targetWorld, cCurr, StringComparison.Ordinal))
-                        continue;
-                    if (EzThrottler.Throttle("SelectChara", 150))
+                    bool matchesHome = string.Equals(targetWorld, cHome, StringComparison.Ordinal);
+                    bool matchesCurrent = string.Equals(targetWorld, cCurr, StringComparison.Ordinal);
+
+                    if (matchesHome || matchesCurrent)
                     {
-                        PluginLog.Information($"[AutoLogin] Logging in to world {ExcelWorldHelper.GetName(c.CurrentWorld)} as {c.Name}@{ExcelWorldHelper.GetName(c.HomeWorld)}");
-                        c.Login();
+                        if (EzThrottler.Throttle("AutoLogin.SelectChara", 150))
+                        {
+                            PluginLog.Information($"[AutoLogin] Logging in to world {cCurr} as {c.Name}@{cHome}");
+                            c.Login();
+                        }
+                        return false;
                     }
+
+                    if (SelectCharacterWorld(menu, c, targetWorld))
+                    {
+                        PluginLog.Information($"[AutoLogin] Switching {c.Name} to target world {targetWorld} before login.");
+                        return false;
+                    }
+
                     return false;
                 }
             }
-        return false;
+
+            return false;
+        }
+
+        private bool SelectCharacterWorld(AddonMaster._CharaSelectListMenu menu, AddonMaster._CharaSelectListMenu.Character characterEntry, string targetWorld)
+        {
+            if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "_CharaSelectWorldServer", out var worldServerAddon) &&
+                GenericHelpers.IsAddonReady(worldServerAddon) &&
+                worldServerAddon->IsVisible)
+            {
+                return SelectWorldFromWorldServerMenu(targetWorld);
+            }
+
+            if (EzThrottler.Throttle("AutoLogin.OpenWorldSelect", 200))
+            {
+                if (!characterEntry.IsSelected)
+                {
+                    PluginLog.Information($"[AutoLogin] Selecting character {characterEntry.Name} before opening world selector.");
+                    characterEntry.Select();
+                    return true;
+                }
+
+                PluginLog.Information($"[AutoLogin] Opening world selector for {characterEntry.Name}.");
+                menu.World();
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool SelectWorldFromWorldServerMenu(string targetWorld)
+        {
+            if (!AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "_CharaSelectWorldServer", out var addon) || !GenericHelpers.IsAddonReady(addon) || !addon->IsVisible)
+                return false;
+
+            var worldMenu = new AddonMaster._CharaSelectWorldServer((void*)addon);
+
+            foreach (var world in worldMenu.Worlds)
+            {
+                if (!string.Equals(world.Name, targetWorld, StringComparison.Ordinal))
+                    continue;
+
+                if (EzThrottler.Throttle("AutoLogin.SelectWorldServer", 200))
+                {
+                    PluginLog.Information($"[AutoLogin] Selecting target world/server: {targetWorld}");
+                    world.Select();
+                }
+
+                return true;
+            }
+
+            return false;
         }
         #endregion
 
@@ -693,7 +778,7 @@ namespace VIWI.Modules.AutoLogin
                     m.Text.Contains("einloggen?", StringComparison.OrdinalIgnoreCase) || m.Text.Contains("eingeloggt", StringComparison.OrdinalIgnoreCase) || m.Text.Contains("ausgeloggt hast", StringComparison.Ordinal) ||                //DE
                     m.Text.Contains("Se connecter", StringComparison.OrdinalIgnoreCase) || m.Text.Contains("connecter avec", StringComparison.OrdinalIgnoreCase) || m.Text.Contains("dernière connexion n'a pas", StringComparison.Ordinal))     //FR
                 {
-                    if (EzThrottler.Throttle("ConfirmLogin", 150))
+                    if (EzThrottler.Throttle("AutoLogin.ConfirmLogin", 150))
                     {
                         PluginLog.Debug("[AutoLogin] Confirming login...");
                         m.Yes();
@@ -777,15 +862,14 @@ namespace VIWI.Modules.AutoLogin
                 PluginLog.Warning("[AutoLogin] ClientLaunchPath is not configured; cannot restart client.");
                 return;
             }
-            if (_shutdownRetry > 0)
-            {
-                KillClient();
-                return;
-            }
 
-            if ((DateTime.Now - _lastRestartRequest).TotalSeconds < 5)
+            if (_restartInProgress)
                 return;
 
+            if ((DateTime.Now - _lastRestartRequest).TotalSeconds < 20)
+                return;
+
+            _restartInProgress = true;
             _lastRestartRequest = DateTime.Now;
 
             var region = regionOverride ?? _configuration.CurrentRegion;
@@ -805,6 +889,7 @@ namespace VIWI.Modules.AutoLogin
                 {
                     PluginLog.Warning($"[AutoLogin] Launch target does not exist: {launchPath}. Clearing restart flag.");
                     ClearRestartFlag();
+                    _restartInProgress = false;
                     return;
                 }
 
@@ -821,6 +906,7 @@ namespace VIWI.Modules.AutoLogin
             {
                 PluginLog.Error(ex, "[AutoLogin] Failed launching new client. Clearing restart flag.");
                 ClearRestartFlag();
+                _restartInProgress = false;
                 return;
             }
 
@@ -836,18 +922,17 @@ namespace VIWI.Modules.AutoLogin
             taskManager.Enqueue(() =>
             {
                 PluginLog.Information("[AutoLogin] Attempting graceful shutdown.");
-
-                CommandManager.ProcessCommand("/shutdown");
-
+                Chat.ExecuteCommand("/shutdown");
+                _shutdownRetry++;
                 return true;
             }, "AutoLogin.ShutdownAttempt1");
 
             taskManager.EnqueueDelay(200);
             taskManager.Enqueue(() =>
             {
-                CommandManager.ProcessCommand("/shutdown");
+                ClearDisconnectErrors();
+                Chat.ExecuteCommand("/shutdown");
                 _shutdownRetry++;
-
                 return true;
             }, "AutoLogin.ShutdownAttempt2");
 
@@ -855,11 +940,17 @@ namespace VIWI.Modules.AutoLogin
             taskManager.Enqueue(() =>
             {
                 PluginLog.Warning("[AutoLogin] Graceful shutdown failed, using /xlkill fallback.");
-
                 CommandManager.ProcessCommand("/xlkill");
-
                 return true;
             }, "AutoLogin.ShutdownFallbackKill");
+
+            taskManager.EnqueueDelay(200);
+            taskManager.Enqueue(() =>
+            {
+                PluginLog.Warning("[AutoLogin] Graceful shutdown failed, fallback failed, forcing kill.");
+                Process.GetCurrentProcess().Kill();
+                return true;
+            }, "AutoLogin.ShutdownEnvKill");
         }
         private void CheckRestartFlag()
         {
@@ -875,7 +966,10 @@ namespace VIWI.Modules.AutoLogin
                 snap.HasMinimumIdentity)
             {
                 PluginLog.Information($"[AutoLogin] Restart with region snapshot: {region} ({snap.CharacterName}@{snap.HomeWorldName}).");
-                EnqueueLoginLoop(snap);
+                if (ModuleConfig.LoginOnRestart)
+                {
+                    EnqueueLoginLoop(snap);
+                }
             }
 
             ModuleConfig.AuthsRecovered++;
