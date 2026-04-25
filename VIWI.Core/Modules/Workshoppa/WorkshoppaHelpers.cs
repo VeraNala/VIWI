@@ -1,16 +1,100 @@
 using Dalamud.Game.ClientState.Objects.SubKinds;
+using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Plugin.Services;
+using ECommons;
+using ECommons.Automation;
+using ECommons.Configuration;
+using ECommons.DalamudServices;
+using ECommons.GameHelpers;
+using ECommons.Logging;
 using Lumina.Excel.Sheets;
 using System;
 using System.Collections.Generic;
-using System.Text;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Numerics;
+using System.Text.RegularExpressions;
+using System.Windows.Forms.VisualStyles;
 
 namespace VIWI.Modules.Workshoppa
 {
-    internal class WorkshoppaHelpers
+
+    internal static class WorkshoppaHelpers
     {
         public const ushort PreferredWorldBonusStatusId = 1411;
-        public static bool HasStatus(IPlayerCharacter player, ushort statusId)
+        private static readonly HashSet<uint> FabricationStationBaseIds = new()
+        {
+            2005236,
+            2005238,
+            2005240,
+            2007821,
+            2011588,
+        };
+        internal static bool TryGetNearestFabricationStation(out IGameObject? obj)
+        {
+            obj = null;
+
+            if (!Player.Available || Player.Object == null)
+                return false;
+
+            var playerPos = Player.Object.Position;
+
+            obj = Svc.Objects
+                .Where(x => x != null && x.IsTargetable && FabricationStationBaseIds.Contains(x.BaseId)).OrderBy(x => Vector3.DistanceSquared(x.Position, playerPos)).FirstOrDefault();
+
+            return obj != null;
+        }
+
+        internal static bool Lockon()
+        {
+            if (TryGetNearestFabricationStation(out var obj) && obj != null)
+            {
+                if (Svc.Targets.Target?.Address != obj.Address)
+                {
+                    Svc.Targets.Target = obj;
+                    return false;
+                }
+
+                Chat.ExecuteCommand("/lockon on");
+                return true;
+            }
+
+            return false;
+        }
+
+        internal static bool Approach()
+        {
+            if (TryGetNearestFabricationStation(out var obj) &&
+                obj != null &&
+                Svc.Targets.Target?.Address == obj.Address)
+            {
+                Chat.ExecuteCommand("/automove on");
+                return true;
+            }
+
+            return false;
+        }
+
+        internal static bool AutomoveOffStation()
+        {
+            if (!Player.Available || Player.Object == null)
+                return false;
+
+            if (TryGetNearestFabricationStation(out var obj) &&
+                obj != null &&
+                Svc.Targets.Target?.Address == obj.Address)
+            {
+                if (Vector3.Distance(obj.Position, Player.Object.Position) < 3.2f)
+                {
+                    Chat.ExecuteCommand("/automove off");
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+    public static bool HasStatus(IPlayerCharacter player, ushort statusId)
         {
             foreach (var s in player.StatusList)
             {

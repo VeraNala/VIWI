@@ -1,17 +1,19 @@
+using Dalamud.Game.ClientState.Objects.Enums;
+using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Memory;
+using Dalamud.Utility;
+using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Client.Game.Control;
+using FFXIVClientStructs.FFXIV.Client.System.String;
+using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+using FFXIVClientStructs.FFXIV.Component.GUI;
+using InteropGenerator.Runtime;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
-using Dalamud.Game.ClientState.Objects.Enums;
-using Dalamud.Game.ClientState.Objects.Types;
-using Dalamud.Memory;
-using FFXIVClientStructs.FFXIV.Client.Game;
-using FFXIVClientStructs.FFXIV.Client.Game.Control;
-using FFXIVClientStructs.FFXIV.Client.UI;
-using FFXIVClientStructs.FFXIV.Client.UI.Agent;
-using FFXIVClientStructs.FFXIV.Component.GUI;
-using InteropGenerator.Runtime;
 using VIWI.Helpers;
 using VIWI.Modules.Workshoppa.GameData;
 using static VIWI.Core.VIWIContext;
@@ -35,14 +37,14 @@ internal sealed partial class WorkshoppaModule
 
     private float GetDistanceToEventObject(IReadOnlyList<uint> npcIds, out IGameObject? o)
     {
-        Vector3? localPlayerPosition = ClientState.LocalPlayer?.Position;
+        Vector3? localPlayerPosition = ObjectTable.LocalPlayer?.Position;
         if (localPlayerPosition != null)
         {
             foreach (var obj in ObjectTable)
             {
                 if (obj.ObjectKind == ObjectKind.EventObj)
                 {
-                    if (npcIds.Contains(obj.DataId))
+                    if (npcIds.Contains(obj.BaseId))
                     {
                         o = obj;
                         float distance = Vector3.Distance(localPlayerPosition.Value,
@@ -131,8 +133,7 @@ internal sealed partial class WorkshoppaModule
         if (AddonHelpers.TryGetAddonByName<AddonSelectYesno>(GameGui, "SelectYesno", out var addonSelectYesno) &&
             AddonState.IsAddonReady(&addonSelectYesno->AtkUnitBase))
         {
-            var text = MemoryHelper.ReadSeString(&addonSelectYesno->PromptText->NodeText).ToString();
-            text = text
+            var text = addonSelectYesno->PromptText->NodeText.ExtractText()
                 .Replace("\n", "", StringComparison.Ordinal)
                 .Replace("\r", "", StringComparison.Ordinal);
             if (predicate(text))

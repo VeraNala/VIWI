@@ -2,6 +2,7 @@ using System;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Memory;
+using Dalamud.Utility;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using static VIWI.Core.VIWIContext;
 
@@ -14,7 +15,7 @@ internal sealed partial class WorkshoppaModule
         PluginLog.Verbose("SelectYesNo post-setup");
 
         AddonSelectYesno* addonSelectYesNo = (AddonSelectYesno*)args.Addon.Address;
-        string text = MemoryHelper.ReadSeString(&addonSelectYesNo->PromptText->NodeText).ToString()
+        string text = addonSelectYesNo->PromptText->NodeText.ExtractText()
             .Replace("\n", "", StringComparison.Ordinal)
             .Replace("\r", "", StringComparison.Ordinal);
         PluginLog.Verbose($"YesNo prompt: '{text}'");
@@ -92,9 +93,18 @@ internal sealed partial class WorkshoppaModule
             {
                 PluginLog.Information($"Selecting 'yes' ({text})");
                 addonSelectYesNo->AtkUnitBase.FireCallbackInt(0);
+                if (AllLevelingMaterialsExhausted() || AllLevelingTargetsDisabled())
+                {
+                    ChatGui.Print("[Workshoppa] Reached Target Level or out of Materials, Stopping.");
+                    CurrentStage = Stage.RequestStop;
+                }
+                else
+                {
+                    CurrentStage = Stage.TakeItemFromQueue;
+                }
                 ResetLevelingProject();
                 _configuration.CurrentlyCraftedItem = null;
-                CurrentStage = Stage.SelectCraftBranch;
+                SaveConfig();
                 _continueAt = DateTime.Now.AddSeconds(1);
             }
         }

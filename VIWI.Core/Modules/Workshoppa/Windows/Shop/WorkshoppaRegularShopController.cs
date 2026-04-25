@@ -172,7 +172,14 @@ internal sealed unsafe class RegularShopController : IDisposable
 
     public void HandleNextPurchaseStep()
     {
-        if (ItemForSale == null || PurchaseState == null) return;
+
+        if (PurchaseState == null) return;
+        if (ItemForSale == null) return;
+
+        uint itemId = ItemForSale.Value.ItemId;
+        int desired = PurchaseState.DesiredItems;
+        int owned = PurchaseState.OwnedItems;
+
         if (PurchaseState.IsAwaitingYesNo && _lastPurchaseAttempt != DateTime.MinValue && DateTime.Now - _lastPurchaseAttempt > TimeSpan.FromSeconds(3))
         {
             _log.Warning("[Shop] Purchase step timed out. Retrying.");
@@ -185,9 +192,12 @@ internal sealed unsafe class RegularShopController : IDisposable
         int maxStackSize = DetermineMaxStackSize(ItemForSale.Value.ItemId);
         if (maxStackSize == 0 && !HasFreeInventorySlot())
         {
-            _log.Warning($"No free inventory slots, can't buy more {ItemForSale.Value.ItemName}");
+            _closeShopRequested = true;
             PurchaseState = null;
+            PurchaseItemId = null;
+            _log.Warning($"No free inventory slots, can't buy more {ItemForSale.Value.ItemName}");
             _parent.RestoreExternalPluginState();
+            _parent.NotifyAutoBuyCompleted(itemId, desired, owned);
             return;
         }
 
@@ -205,15 +215,10 @@ internal sealed unsafe class RegularShopController : IDisposable
             return;
         }
         _closeShopRequested = true;
-
-        uint itemId = ItemForSale.Value.ItemId;
-        int desired = PurchaseState.DesiredItems;
-        int owned = PurchaseState.OwnedItems;
-
-        _log.Information($"Stopping item purchase (desired = {desired}, owned = {owned})");
         PurchaseState = null;
+        PurchaseItemId = null;
+        _log.Information($"Stopping item purchase (desired = {desired}, owned = {owned})");
         _parent.RestoreExternalPluginState();
-
         _parent.NotifyAutoBuyCompleted(itemId, desired, owned);
         return;
     }

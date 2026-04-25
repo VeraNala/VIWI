@@ -2,7 +2,7 @@
 
 	<PropertyGroup>
 		<Authors>VeraNala</Authors>
-		<Version>0.0.0.48</Version>
+		<Version>0.0.0.51</Version>
 		<TargetFramework>net10.0-windows7.0</TargetFramework>
 		<Platforms>x64</Platforms>
 		<LangVersion>preview</LangVersion>

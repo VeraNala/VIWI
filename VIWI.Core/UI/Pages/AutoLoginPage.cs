@@ -1,11 +1,11 @@
 using Dalamud.Bindings.ImGui;
-using Dalamud.Interface;
 using Dalamud.Interface.Components;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using ECommons.ImGuiMethods;
 using ECommons.Logging;
 using System;
+using System.IO;
 using System.Numerics;
 using VIWI.Core;
 using VIWI.Helpers;
@@ -120,6 +120,8 @@ namespace VIWI.UI.Pages
                 config.LoginOnLaunch = lol;
                 module?.SaveConfig();
             }
+            ImGui.SameLine();
+            ImGuiComponents.HelpMarker("Note: Holding Shift at any point of the login process will cancel this.");
 
             ImGuiHelpers.ScaledDummy(2f);
             if (config.RestartingClient || config.PendingRestartRegion != LoginRegion.Unknown)
@@ -421,45 +423,83 @@ namespace VIWI.UI.Pages
             if (string.IsNullOrWhiteSpace(launchPath))
                 return ("Missing Launch Path.", bad);
 
-            var p = launchPath.Trim();
+            var (p, args) = NormalizeLaunchInputs(launchPath, launchArgs);
+
+            if (string.IsNullOrWhiteSpace(p))
+                return ("Missing Launch Path.", bad);
+
             bool isUri = p.Contains("://", StringComparison.OrdinalIgnoreCase);
+            if (isUri)
+                return ("URI launch target detected. Validation is limited, but this is allowed.", warn);
 
-            if (!isUri)
+            string ext = Path.GetExtension(p).ToLowerInvariant();
+            string fileName = Path.GetFileName(p);
+
+            bool isExe = ext == ".exe";
+            bool isBatch = ext == ".bat" || ext == ".cmd";
+            bool isRunAs = fileName.Equals("runas.exe", StringComparison.OrdinalIgnoreCase) ||
+                           Path.GetFileNameWithoutExtension(p).Equals("runas", StringComparison.OrdinalIgnoreCase);
+
+            if (!File.Exists(p) && launchPath.TrimStart().StartsWith("runas ", StringComparison.OrdinalIgnoreCase))
+                return string.IsNullOrWhiteSpace(args)
+                    ? ("RunAs command detected, but no arguments were found.", bad)
+                    : ("RunAs wrapper detected. Validation limited.", warn);
+
+            if (!File.Exists(p))
+                return ("Launch Path does not exist.", bad);
+
+            if (isBatch)
+                return ("Batch launcher detected. Validation limited.", warn);
+
+            if (isRunAs)
             {
-                try
-                {
-                    if (!System.IO.File.Exists(p))
-                        return ("Launch Path does not exist.", bad);
-                }
-                catch
-                {
-                    return ("Launch Path is invalid.", bad);
-                }
+                if (string.IsNullOrWhiteSpace(args))
+                    return ("RunAs.exe detected, but launch arguments are empty.", bad);
+
+                return ("RunAs wrapper detected. Validation limited.", warn);
             }
 
-            bool looksLikeXivLauncher =
-                p.EndsWith("XIVLauncher.exe", StringComparison.OrdinalIgnoreCase) ||
-                p.IndexOf("xivlauncher", StringComparison.OrdinalIgnoreCase) >= 0;
-
-            var args = (launchArgs ?? string.Empty).Trim();
-            bool hasAccount = args.IndexOf("--account=", StringComparison.OrdinalIgnoreCase) >= 0;
-            bool hasRoaming = args.IndexOf("--roamingPath=", StringComparison.OrdinalIgnoreCase) >= 0;
-
-            if (!looksLikeXivLauncher && !isUri)
+            if (isExe)
             {
-                return ("Path OK, but this doesn’t look like XIVLauncher (may not auto-login).", warn);
+                bool looksLikeXivLauncher =
+                    fileName.Equals("XIVLauncher.exe", StringComparison.OrdinalIgnoreCase) ||
+                    p.IndexOf("xivlauncher", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                if (!looksLikeXivLauncher)
+                    return ("Executable exists, but this does not look like XIVLauncher. It may still work if it launches the correct target.", warn);
+
+                bool hasAccount = args.IndexOf("--account=", StringComparison.OrdinalIgnoreCase) >= 0;
+                bool hasRoaming = args.IndexOf("--roamingPath=", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                if (!hasAccount)
+                    return ("Path OK. Missing --account=… (auto-login may not work).", warn);
+
+                if (!hasRoaming)
+                    return ("Looks OK. (Tip: add --roamingPath=… if you use a custom XIVLauncherData path.)", ok);
+
+                return ("Looks OK.", ok);
             }
 
-            if (!hasAccount)
-            {
-                return ("Path OK. Missing --account=… (auto-login may not work).", warn);
-            }
-
-            if (!hasRoaming)
-                return ("Looks OK. (Tip: add --roamingPath=… if you use a custom XIVLauncherData path.)", ok);
-
-            return ("Looks OK.", ok);
+            return ("Launch target exists, but format is not recognized.", warn);
         }
+        private static (string Path, string Args) NormalizeLaunchInputs(string launchPath, string launchArgs)
+        {
+            var path = launchPath?.Trim() ?? string.Empty;
+            var args = launchArgs?.Trim() ?? string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(args))
+                return (path, args);
+
+            if (path.StartsWith("runas ", StringComparison.OrdinalIgnoreCase))
+            {
+                int firstSpace = path.IndexOf(' ');
+                if (firstSpace > 0)
+                    return ("runas", path[(firstSpace + 1)..].Trim());
+            }
+
+            return (path, args);
+        }
+
         private static void DrawRegionRow(AutoLoginConfig config, LoginRegion region)
         {
             config.LastByRegion ??= new();

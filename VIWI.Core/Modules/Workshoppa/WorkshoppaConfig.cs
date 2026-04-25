@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using TerraFX.Interop.Windows;
 using VIWI.Modules.Workshoppa.GameData;
 
 namespace VIWI.Modules.Workshoppa;

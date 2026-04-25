@@ -1,12 +1,9 @@
 using Dalamud.Bindings.ImGui;
-using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Interface.Components;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
-using Dalamud.Plugin.Services;
 using ECommons.ImGuiMethods;
 using Lumina.Excel.Sheets;
-using System;
 using System.Numerics;
 using VIWI.Core;
 using VIWI.Helpers;
@@ -242,7 +239,7 @@ namespace VIWI.UI.Pages
                 Row("/buy-stone", "Buy a given number of mudstone stacks.");
                 Row("/fill-stone", "Fill your inventory with a given number of mudstone stacks.");
                 Row("/grindstone", "Starts the experimental leveling feature.");
-                Row("/g6sm", "Buy Grade6DarkMatter at a 5:1 ratio for RepairKits.");
+                Row("/g6dm", "Buy Grade6DarkMatter at a 5:1 ratio for RepairKits.");
 
                 ImGui.EndTable();
             }

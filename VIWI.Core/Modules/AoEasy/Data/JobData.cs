@@ -101,7 +101,7 @@ namespace VIWI.Modules.AoEasy
         public static bool TryGet(uint rowId, out JobInfo info)
         {
             InitializeJobs();
-            return Jobs.TryGetValue(rowId, out info);
+            return Jobs.TryGetValue(rowId, out info!);
         }
 
         private static Job MapRole(byte role) => role switch

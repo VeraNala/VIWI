@@ -2,7 +2,6 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Components;
 using Dalamud.Interface.Utility;
-using Dalamud.Plugin.Ipc.Exceptions;
 using ECommons.ImGuiMethods;
 using System;
 using System.Collections.Generic;
@@ -76,14 +75,14 @@ namespace VIWI.UI.Pages
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(8f);
 
-            DrawQuickStatus(module);
+            DrawQuickStatus(module!);
             ImGuiHelpers.ScaledDummy(2f);
 
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(4f);
-            DrawWeaponIconsSection(config, module);
+            DrawWeaponIconsSection(config, module!);
             ImGuiHelpers.ScaledDummy(2f);
-            DrawPerCharacterSection(config, module);
+            DrawPerCharacterSection(config, module!);
             ImGuiHelpers.ScaledDummy(4f);
             ImGui.Separator();
 
@@ -267,7 +266,7 @@ namespace VIWI.UI.Pages
 
                 if (ImGuiComponents.IconButton(FontAwesomeIcon.Trash))
                 {
-                    config.Characters.RemoveAll(x => x.LocalContentId == cid);
+                    config.Characters?.RemoveAll(x => x.LocalContentId == cid);
                     _nameByCid.Remove(cid);
                     module.SaveConfig();
 

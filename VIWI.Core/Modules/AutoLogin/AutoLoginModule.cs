@@ -1,3 +1,4 @@
+using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Command;
 using Dalamud.Hooking;
 using Dalamud.Interface.Windowing;
@@ -49,6 +50,7 @@ namespace VIWI.Modules.AutoLogin
         private readonly AutoRetainerIPC _autoRetainerIPC = new();
         private QuickLaunchOverlay? _qlOverlay;
         private bool _autoLoginRunning;
+        private bool _initFlag;
         public const string RestartCommand = "/viwirestart";
 
         //internal IntPtr StartHandler;
@@ -84,9 +86,10 @@ namespace VIWI.Modules.AutoLogin
             }
             _qlOverlay?.IsOpen = _configuration.QuickLaunchEnabled;
 
-            if (QuickLaunchOverlay.IsOnTitleOrLoginScreens() && ModuleConfig.LoginOnLaunch)
+            if (_configuration.LoginOnLaunch && !_configuration.RestartingClient && !ImGui.GetIO().KeyShift && !_initFlag)
             {
-                EnqueueLoginLoop(Snap);
+                StartAutoLogin();
+                _initFlag = true;
             }
             if (_configuration.Enabled)
                 Enable();
@@ -176,15 +179,20 @@ namespace VIWI.Modules.AutoLogin
 
         private void OnLogin()
         {
-            if (!_configuration.Enabled || !_disconnected) return;
-            PluginLog.Information("[AutoLogin] Successfully logged in, auto-login finished.");
-            _configuration.DCsRecovered++;
-            UpdateConfig();
+            if (_configuration.Enabled && _autoLoginRunning)
+            {
+                PluginLog.Debug("[AutoLogin] Successfully Logged In! Enjoy!");
 
-            if (_configuration.RunLoginCommands && _configuration.LoginCommands.Count > 0 && _disconnected)
-                _pendingLoginCommands = true;
+                _configuration.DCsRecovered++;
+                UpdateConfig();
 
-            _disconnected = false;
+                if (_configuration.RunLoginCommands && _configuration.LoginCommands.Count > 0 && _disconnected)
+                    _pendingLoginCommands = true;
+
+                _autoLoginRunning = false;
+                _errorCounter = 0;
+                _disconnected = false;
+            }
         }
         private void OnLogout(int type, int code)
         {
@@ -219,7 +227,6 @@ namespace VIWI.Modules.AutoLogin
         {
             UpdateConfig();
         }
-
 
         private void UpdateConfig()
         {
@@ -270,6 +277,16 @@ namespace VIWI.Modules.AutoLogin
 
             if (_qlOverlay != null)
                 _qlOverlay.IsOpen = _configuration.QuickLaunchEnabled && QuickLaunchOverlay.IsOnTitleOrLoginScreens();
+
+            if (_autoLoginRunning && ImGui.GetIO().KeyShift)
+            {
+                if (EzThrottler.Throttle("AutoLogin.ShiftStop", 500))
+                {
+                    PluginLog.Warning("[AutoLogin] Shift held → stopping AutoLogin.");
+                    StopAutoLogin();
+                }
+                return;
+            }
 
             var errorVisible = IsLobbyErrorVisible();
 
@@ -333,7 +350,6 @@ namespace VIWI.Modules.AutoLogin
             taskManager.Enqueue(() => SelectServiceAccountIndex(index), "SelectServiceAccount");
             taskManager.Enqueue(() => SelectCharacter(chara, hWorld, cWorld, dc), "SelectCharacter");
             taskManager.Enqueue(() => ConfirmLogin(), "ConfirmLogin");
-            _autoLoginRunning = false;
         }
 
         public void StartAutoLogin()
@@ -429,7 +445,6 @@ namespace VIWI.Modules.AutoLogin
             noKillHookInitialized = true;
         }
         #endregion
-
         #region Step 1 - Title Screen
         private bool SelectDataCenterMenu()  // Title Screen -> Selecting Data Center Menu
         {
@@ -763,12 +778,7 @@ namespace VIWI.Modules.AutoLogin
         private bool? ConfirmLogin()
         {
             if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "SelectOk", out _)) return true;
-            if (ClientState.IsLoggedIn)
-            {
-                PluginLog.Debug("[AutoLogin] Successfully Logged In! Enjoy!");
-                _errorCounter = 0;
-                return true;
-            }
+
 
             if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "SelectYesno", out var yesnoPtr) && GenericHelpers.IsAddonReady(yesnoPtr))
             {
@@ -857,7 +867,7 @@ namespace VIWI.Modules.AutoLogin
 
         public void RequestClientRestart(LoginRegion? regionOverride = null)
         {
-            if (string.IsNullOrWhiteSpace(ModuleConfig.ClientLaunchPath))
+            if (string.IsNullOrWhiteSpace(_configuration.ClientLaunchPath))
             {
                 PluginLog.Warning("[AutoLogin] ClientLaunchPath is not configured; cannot restart client.");
                 return;
@@ -876,14 +886,14 @@ namespace VIWI.Modules.AutoLogin
             if (region == LoginRegion.Unknown)
                 region = LoginRegion.NA;
 
-            ModuleConfig.RestartingClient = true;
-            ModuleConfig.PendingRestartRegion = region;
+            _configuration.RestartingClient = true;
+            _configuration.PendingRestartRegion = region;
             SaveConfig();
 
             try
             {
-                var launchPath = ModuleConfig.ClientLaunchPath;
-                var launchArgs = ModuleConfig.ClientLaunchArgs ?? string.Empty;
+                var launchPath = _configuration.ClientLaunchPath;
+                var launchArgs = _configuration.ClientLaunchArgs ?? string.Empty;
 
                 if (!launchPath.Contains("://", StringComparison.OrdinalIgnoreCase) && !File.Exists(launchPath))
                 {
@@ -954,32 +964,32 @@ namespace VIWI.Modules.AutoLogin
         }
         private void CheckRestartFlag()
         {
-            if (!ModuleConfig.RestartingClient)
+            if (!_configuration.RestartingClient)
                 return;
 
-            var region = ModuleConfig.PendingRestartRegion;
+            var region = _configuration.PendingRestartRegion;
             PluginLog.Information($"[AutoLogin] Detected RestartingClient flag (region={region}).");
 
             if (region != LoginRegion.Unknown &&
-                ModuleConfig.LastByRegion.TryGetValue(region, out var snap) &&
+                _configuration.LastByRegion.TryGetValue(region, out var snap) &&
                 snap != null &&
                 snap.HasMinimumIdentity)
             {
                 PluginLog.Information($"[AutoLogin] Restart with region snapshot: {region} ({snap.CharacterName}@{snap.HomeWorldName}).");
-                if (ModuleConfig.LoginOnRestart)
+                if (_configuration.LoginOnRestart)
                 {
                     EnqueueLoginLoop(snap);
                 }
             }
 
-            ModuleConfig.AuthsRecovered++;
+            _configuration.AuthsRecovered++;
             ClearRestartFlag();
         }
 
         private void ClearRestartFlag()
         {
-            ModuleConfig.RestartingClient = false;
-            ModuleConfig.PendingRestartRegion = LoginRegion.Unknown;
+            _configuration.RestartingClient = false;
+            _configuration.PendingRestartRegion = LoginRegion.Unknown;
             SaveConfig();
         }
 
@@ -1077,7 +1087,7 @@ namespace VIWI.Modules.AutoLogin
             taskManager.Abort();
             StartAutoLogin();
         }
-        public bool IsAutoLoginRunning => _autoLoginRunning || taskManager.IsBusy || _inErrorRecovery;
+        public bool IsAutoLoginRunning() => _autoLoginRunning || taskManager.IsBusy || _inErrorRecovery;
 
         public void StopAutoLogin()
         {

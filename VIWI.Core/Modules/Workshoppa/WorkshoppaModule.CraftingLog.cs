@@ -4,6 +4,7 @@ using System;
 using System.Linq;
 using VIWI.Helpers;
 using static VIWI.Core.VIWIContext;
+using static VIWI.Modules.Workshoppa.WorkshoppaConfig;
 using ValueType = FFXIVClientStructs.FFXIV.Component.GUI.ValueType;
 
 namespace VIWI.Modules.Workshoppa;
@@ -53,6 +54,13 @@ internal sealed partial class WorkshoppaModule
     {
         if (SelectSelectString("craftlog", 0, s => s == _gameStrings.ViewCraftingLog))
             CurrentStage = Stage.SelectCraftCategory;
+        else if (_configuration.Mode == TurnInMode.Leveling
+            && AnyLevelingTargetsEnabled()
+            && SelectSelectString("Discontinue", 2, s => s.StartsWith("Discontinue project.", StringComparison.Ordinal)))
+        {
+            CurrentStage = Stage.DiscontinueProject;
+            _continueAt = DateTime.Now.AddSeconds(1);
+        }
     }
 
     private unsafe void SelectCraftCategory()

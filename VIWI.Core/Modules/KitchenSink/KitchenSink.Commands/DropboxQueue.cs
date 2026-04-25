@@ -3,7 +3,6 @@ using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Ipc;
 using Dalamud.Plugin.Services;
-using ECommons.Logging;
 using ECommons.Reflection;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using System;
@@ -13,7 +12,6 @@ using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 
 namespace VIWI.Modules.KitchenSink.Commands;
 
@@ -65,7 +63,7 @@ internal sealed class DropboxQueue : IDisposable
 
 		public void ClearQueue()
 		{
-			if (TryGetItemQuantities(out IDalamudPlugin _, out IDictionary itemQuantities))
+			if (TryGetItemQuantities(out IDalamudPlugin? _, out IDictionary? itemQuantities))
 			{
 				itemQuantities.Clear();
 			}
@@ -224,7 +222,7 @@ internal sealed class DropboxQueue : IDisposable
 
     private void AddToQueue(string arguments)
 	{
-		IReadOnlyList<NeededItem> readOnlyList = ParseArguments(arguments);
+		IReadOnlyList<NeededItem> readOnlyList = ParseArguments(arguments)!;
 		if (readOnlyList == null)
 		{
 			return;
@@ -255,7 +253,7 @@ internal sealed class DropboxQueue : IDisposable
 
 	private ReadOnlyCollection<NeededItem>? ParseArguments(string arguments)
 	{
-        List<(string, NeededItem)> list = (from x in arguments.Split(' ') select x.Split(':')).Select(delegate (string[] x)
+        List<(string, NeededItem?)> list = (from x in arguments.Split(' ') select x.Split(':')).Select(delegate (string[] x)
         {
             if (x.Length != 2)
 		    {
@@ -285,19 +283,19 @@ internal sealed class DropboxQueue : IDisposable
 			select x.Item1).ToList();
 		if (list2.Count == 1)
 		{
-			_chatGui.PrintError("dbq: " + list2.First(), (string)null, (ushort?)null);
+			_chatGui.PrintError("dbq: " + list2.First(), (string?)null, (ushort?)null);
 			return null;
 		}
 		if (list2.Count >= 2)
 		{
-			_chatGui.PrintError("dbq: Multiple errors occured:", (string)null, (ushort?)null);
+			_chatGui.PrintError("dbq: Multiple errors occured:", (string?)null, (ushort?)null);
 			foreach (string item in list2)
 			{
-				_chatGui.PrintError(" - " + item, (string)null, (ushort?)null);
+				_chatGui.PrintError(" - " + item, (string?)null, (ushort?)null);
 			}
 			return null;
 		}
-		return list.Select(((string, NeededItem) x) => x.Item2).ToList().AsReadOnly();
+		return list.Select(((string, NeededItem?) x) => x.Item2).ToList().AsReadOnly()!;
 	}
 
     private unsafe Dictionary<uint, ItemCount> GetItemCounts()

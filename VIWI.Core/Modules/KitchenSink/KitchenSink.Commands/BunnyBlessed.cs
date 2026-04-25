@@ -68,14 +68,14 @@ internal sealed class BunnyBlessed : IDisposable
 
 	private void OnFrameworkUpdate(IFramework framework)
 	{
-		IPlayerCharacter localPlayer = _clientState.LocalPlayer;
+		IPlayerCharacter localPlayer = _objectTable.LocalPlayer!;
 		_lastPlayerPosition = ((localPlayer != null) ? ((IGameObject)localPlayer).Position : Vector3.Zero);
 	}
 
 	private void ProcessCommand(string command, string arguments)
 	{
 		_enabled = !_enabled;
-		_chatGui.Print("Bunny locations are now " + (_enabled ? "marked" : "disabled") + ".", (string)null, (ushort?)null);
+		_chatGui.Print("Bunny locations are now " + (_enabled ? "marked" : "disabled") + ".", (string?)null, (ushort?)null);
 		OnTerritoryChanged(_clientState.TerritoryType);
 	}
 
@@ -85,7 +85,7 @@ internal sealed class BunnyBlessed : IDisposable
 		{
 			return;
 		}
-		PctDrawList val = PictoService.Draw((ImDrawListPtr?)null, (PctDrawHints?)null);
+		PctDrawList val = PictoService.Draw((ImDrawListPtr?)null, (PctDrawHints?)null)!;
 		try
 		{
 			if (val == null)
@@ -100,7 +100,7 @@ internal sealed class BunnyBlessed : IDisposable
 				{
 					continue;
 				}
-				bool flag2 = ((IEnumerable<IGameObject>)_objectTable).Any((IGameObject x) => x.DataId == 2010139 && Vector3.Distance(carrot, x.Position) < 1f);
+				bool flag2 = ((IEnumerable<IGameObject>)_objectTable).Any((IGameObject x) => x.BaseId == 2010139 && Vector3.Distance(carrot, x.Position) < 1f);
 				if (num < 105f || flag2)
 				{
 					if (flag2)

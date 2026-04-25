@@ -28,9 +28,11 @@ internal sealed class CharacterSwitch : IDisposable
     private readonly AutoRetainerIPC _autoRetainer;
     private readonly ICommandManager _commandManager;
     private readonly IClientState _clientState;
+    private readonly IObjectTable _objectTable;
     private readonly IChatGui _chatGui;
     private readonly INotificationManager _notificationManager;
     private readonly ICondition _condition;
+    private readonly IPlayerState _playerState;
     private readonly IPluginLog _pluginLog;
     private readonly IFramework _framework;
     private readonly IDtrBarEntry _dtrBarEntry;
@@ -40,19 +42,23 @@ internal sealed class CharacterSwitch : IDisposable
         AutoRetainerIPC autoRetainer,
         ICommandManager commandManager,
         IClientState clientState,
+        IObjectTable objectTable,
         IChatGui chatGui,
         INotificationManager notificationManager,
         IDtrBar dtrBar,
         ICondition condition,
+        IPlayerState playerState,
         IPluginLog pluginLog,
         IFramework framework)
     {
         _autoRetainer = autoRetainer;
         _commandManager = commandManager;
         _clientState = clientState;
+        _objectTable = objectTable;
         _chatGui = chatGui;
         _notificationManager = notificationManager;
         _condition = condition;
+        _playerState = playerState;
         _pluginLog = pluginLog;
         _framework = framework;
 
@@ -80,8 +86,8 @@ internal sealed class CharacterSwitch : IDisposable
     {
         RunNextTick(() =>
         {
-            var homeId = _clientState.LocalPlayer?.HomeWorld.RowId;
-            var currentId = _clientState.LocalPlayer?.CurrentWorld.RowId;
+            var homeId = _objectTable.LocalPlayer?.HomeWorld.RowId;
+            var currentId = _objectTable.LocalPlayer?.CurrentWorld.RowId;
             if (homeId.HasValue && currentId.HasValue && homeId.Value != currentId.Value)
             {
                 _commandManager.ProcessCommand("/li");
@@ -121,7 +127,7 @@ internal sealed class CharacterSwitch : IDisposable
                 return null;
             }
 
-            var startIdx = regChars.IndexOf(_clientState.LocalContentId);
+            var startIdx = regChars.IndexOf(_playerState.ContentId);
             if (startIdx < 0)
             {
                 if (showError)
@@ -141,7 +147,7 @@ internal sealed class CharacterSwitch : IDisposable
                 if (info == null)
                     continue;
 
-                if (info.CID == _clientState.LocalContentId)
+                if (info.CID == _playerState.ContentId)
                 {
                     if (showError)
                         _chatGui.PrintError("[KitchenSink] No character to switch to found.", null, null);
@@ -304,7 +310,7 @@ internal sealed class CharacterSwitch : IDisposable
                     return;
                 }
 
-                var idx = regChars.IndexOf(_clientState.LocalContentId);
+                var idx = regChars.IndexOf(_playerState.ContentId);
                 if (idx < 0)
                 {
                     _dtrBarEntry.Text = new SeStringBuilder().AddText("AR:?").Build();

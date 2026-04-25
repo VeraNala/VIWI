@@ -1,13 +1,10 @@
 using Dalamud.Plugin.Services;
-using ECommons.Automation;
 using Lumina.Excel;
 using Lumina.Excel.Sheets;
 using Lumina.Text.ReadOnly;
-using System;
 using System.Data;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
-using TerraFX.Interop.Windows;
 using VIWI.Helpers;
 
 namespace VIWI.Modules.Workshoppa.GameData;

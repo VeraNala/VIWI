@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using Dalamud.Configuration;
 
 namespace VIWI.Modules.KitchenSink;
 

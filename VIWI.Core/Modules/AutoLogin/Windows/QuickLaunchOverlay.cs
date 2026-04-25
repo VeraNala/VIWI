@@ -10,14 +10,12 @@ using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using VIWI.Helpers;
-using static FFXIVClientStructs.FFXIV.Client.UI.Misc.GroupPoseModule;
 using static VIWI.Core.VIWIContext;
 
 namespace VIWI.Modules.AutoLogin.Windows
 {
     internal sealed unsafe class QuickLaunchOverlay : Window
     {
-        private float _buttonWidth = 0f;
         private ISharedImmediateTexture? _viwiIcon;
 
         public QuickLaunchOverlay()
@@ -36,6 +34,7 @@ namespace VIWI.Modules.AutoLogin.Windows
         public override void PreDraw()
         {
             ImGui.SetNextWindowPos(new Vector2(30, 30), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSize(new Vector2(ComputeDesiredWindowWidth(), 0f), ImGuiCond.Appearing);
             ImGui.SetNextWindowBgAlpha(0.85f);
             ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 12f * ImGuiHelpers.GlobalScale);
             ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 1.0f);
@@ -62,8 +61,6 @@ namespace VIWI.Modules.AutoLogin.Windows
             var config = module?._configuration;
             if (module == null || config == null || !config.QuickLaunchEnabled)
                 return;
-
-            _buttonWidth = 0f;
 
             SizeConstraints = new WindowSizeConstraints
             {
@@ -99,7 +96,7 @@ namespace VIWI.Modules.AutoLogin.Windows
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(2);
 
-            if (module.IsAutoLoginRunning)
+            if (module.IsAutoLoginRunning())
             {
                 var snap = config.LastByRegion?.GetValueOrDefault(config.CurrentRegion);
 
@@ -107,6 +104,8 @@ namespace VIWI.Modules.AutoLogin.Windows
                     ImGui.TextDisabled($"Logging In: {snap.CharacterName}@{snap.HomeWorldName}");
                 else
                     ImGui.TextDisabled("AutoLogin is running...");
+
+                ImGui.TextDisabled("Click button or Hold Shift to cancel");
 
                 ImGuiHelpers.ScaledDummy(3);
 
@@ -118,91 +117,92 @@ namespace VIWI.Modules.AutoLogin.Windows
                     module.StopAutoLogin();
                 }
 
-                return;
             }
-
-            var regions = new[] { LoginRegion.NA, LoginRegion.EU, LoginRegion.OCE, LoginRegion.JP };
-
-            config.LastByRegion ??= new();
-
-            var entries = new List<(LoginRegion Region, LoginSnapshot Snap)>();
-
-            foreach (var r in regions)
+            else
             {
-                if (config.LastByRegion.TryGetValue(r, out var snap) &&
-                    snap != null &&
-                    !string.IsNullOrWhiteSpace(snap.CharacterName))
+                var regions = new[] { LoginRegion.NA, LoginRegion.EU, LoginRegion.OCE, LoginRegion.JP };
+
+                config.LastByRegion ??= new();
+
+                var entries = new List<(LoginRegion Region, LoginSnapshot Snap)>();
+
+                foreach (var r in regions)
                 {
-                    entries.Add((r, snap));
-                }
-            }
-
-            if (entries.Count == 0)
-            {
-                return;
-            }
-
-            float regionColumnWidth = ImGui.CalcTextSize("[OCE]  ").X;
-            float buttonHeightScale = 1.2f;
-            float maxTextWidth = 220f * ImGuiHelpers.GlobalScale;
-            float minSharedButtonWidth = 180f * ImGuiHelpers.GlobalScale;
-            float maxSharedButtonWidth = 250f * ImGuiHelpers.GlobalScale;
-
-            float sharedButtonWidth = minSharedButtonWidth;
-
-            foreach (var e in entries)
-            {
-                var rawLabel = $"{e.Snap.CharacterName}@{e.Snap.HomeWorldName}";
-                var displayLabel = TruncateLabel(rawLabel, maxTextWidth);
-
-                var dim = ImGuiHelpers.GetButtonSize(displayLabel);
-                sharedButtonWidth = Math.Max(sharedButtonWidth, dim.X + 18f * ImGuiHelpers.GlobalScale);
-            }
-
-            sharedButtonWidth = Math.Min(sharedButtonWidth, maxSharedButtonWidth);
-            foreach (var e in entries)
-            {
-                var regionText = $"[{GetRegionShort(e.Region)}]";
-                var rawLabel = $"{e.Snap.CharacterName}@{e.Snap.HomeWorldName}";
-                var displayLabel = TruncateLabel(rawLabel, maxTextWidth);
-
-                ImGui.AlignTextToFramePadding();
-                ImGui.TextDisabled(regionText);
-
-                ImGui.SameLine(regionColumnWidth + ImGui.GetStyle().ItemSpacing.X);
-
-                float buttonWidth = ImGui.GetContentRegionAvail().X;
-                float buttonHeight = ImGui.GetFrameHeight() * buttonHeightScale;
-
-                using (ImRaii.Disabled(module.IsBusyForQuickLaunch()))
-                {
-                    if (ImGui.Button(displayLabel, new Vector2(buttonWidth, buttonHeight)))
+                    if (config.LastByRegion.TryGetValue(r, out var snap) &&
+                        snap != null &&
+                        !string.IsNullOrWhiteSpace(snap.CharacterName))
                     {
-                        module.QuickLaunchToRegion(e.Region);
+                        entries.Add((r, snap));
                     }
                 }
 
-                if (ImGui.IsItemHovered() && displayLabel != rawLabel)
-                    ImGui.SetTooltip(rawLabel);
-            }
-            bool canRestart = config.SkipAuthError && !string.IsNullOrWhiteSpace(config.ClientLaunchPath);
-            bool ctrlHeld = ImGui.GetIO().KeyCtrl;
-
-            if (canRestart)
-            {
-                ImGuiHelpers.ScaledDummy(2);
-
-                float fullWidth = ImGui.GetContentRegionAvail().X;
-                float height = ImGui.GetFrameHeight() * 1.15f;
-
-                using (ImRaii.Disabled(!ctrlHeld))
+                if (entries.Count == 0)
                 {
-                    if (ImGui.Button("Restart Client", new Vector2(fullWidth, height)))
-                        module.RequestClientRestart(config.CurrentRegion);
+                    return;
                 }
 
-                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                    ImGui.SetTooltip("Hold CTRL while clicking to restart the client.");
+                float regionColumnWidth = ImGui.CalcTextSize("[OCE]  ").X;
+                float buttonHeightScale = 1.2f;
+                float maxTextWidth = 220f * ImGuiHelpers.GlobalScale;
+                float minSharedButtonWidth = 180f * ImGuiHelpers.GlobalScale;
+                float maxSharedButtonWidth = 250f * ImGuiHelpers.GlobalScale;
+
+                float sharedButtonWidth = minSharedButtonWidth;
+
+                foreach (var e in entries)
+                {
+                    var rawLabel = $"{e.Snap.CharacterName}@{e.Snap.HomeWorldName}";
+                    var displayLabel = TruncateLabel(rawLabel, maxTextWidth);
+
+                    var dim = ImGuiHelpers.GetButtonSize(displayLabel);
+                    sharedButtonWidth = Math.Max(sharedButtonWidth, dim.X + 18f * ImGuiHelpers.GlobalScale);
+                }
+
+                sharedButtonWidth = Math.Min(sharedButtonWidth, maxSharedButtonWidth);
+                foreach (var e in entries)
+                {
+                    var regionText = $"[{GetRegionShort(e.Region)}]";
+                    var rawLabel = $"{e.Snap.CharacterName}@{e.Snap.HomeWorldName}";
+                    var displayLabel = TruncateLabel(rawLabel, maxTextWidth);
+
+                    ImGui.AlignTextToFramePadding();
+                    ImGui.TextDisabled(regionText);
+
+                    ImGui.SameLine(regionColumnWidth + ImGui.GetStyle().ItemSpacing.X);
+
+                    float buttonWidth = sharedButtonWidth;
+                    float buttonHeight = ImGui.GetFrameHeight() * buttonHeightScale;
+
+                    using (ImRaii.Disabled(module.IsBusyForQuickLaunch()))
+                    {
+                        if (ImGui.Button(displayLabel, new Vector2(buttonWidth, buttonHeight)))
+                        {
+                            module.QuickLaunchToRegion(e.Region);
+                        }
+                    }
+
+                    if (ImGui.IsItemHovered() && displayLabel != rawLabel)
+                        ImGui.SetTooltip(rawLabel);
+                }
+                bool canRestart = config.SkipAuthError && !string.IsNullOrWhiteSpace(config.ClientLaunchPath);
+                bool ctrlHeld = ImGui.GetIO().KeyCtrl;
+
+                if (canRestart)
+                {
+                    ImGuiHelpers.ScaledDummy(2);
+
+                    float fullWidth = regionColumnWidth + sharedButtonWidth;
+                    float height = ImGui.GetFrameHeight() * 1.15f;
+
+                    using (ImRaii.Disabled(!ctrlHeld))
+                    {
+                        if (ImGui.Button("Restart Client", new Vector2(fullWidth, height)))
+                            module.RequestClientRestart(config.CurrentRegion);
+                    }
+
+                    if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                        ImGui.SetTooltip("Hold CTRL while clicking to restart the client.");
+                }
             }
         }
         private static string GetRegionShort(LoginRegion region)
@@ -272,6 +272,51 @@ namespace VIWI.Modules.AutoLogin.Windows
                 }
             }
             return false;
+        }
+        private float ComputeDesiredWindowWidth()
+        {
+            var module = AutoLoginModule.Instance;
+            var config = module?._configuration;
+            if (module == null || config == null)
+                return 300f * ImGuiHelpers.GlobalScale;
+
+            const float maxWindowWidth = 380f;
+            const float minWindowWidth = 280f;
+
+            float iconSize = 24f * ImGuiHelpers.GlobalScale;
+            float spacing = ImGui.GetStyle().ItemSpacing.X;
+            float windowPadding = ImGui.GetStyle().WindowPadding.X * 2f;
+
+            float titleWidth = ImGui.CalcTextSize("VIWI - AutoLogin").X + iconSize + spacing;
+
+            float regionColumnWidth = ImGui.CalcTextSize("[OCE]  ").X;
+            float maxTextWidth = 220f * ImGuiHelpers.GlobalScale;
+            float minSharedButtonWidth = 180f * ImGuiHelpers.GlobalScale;
+            float maxSharedButtonWidth = 250f * ImGuiHelpers.GlobalScale;
+
+            float sharedButtonWidth = minSharedButtonWidth;
+
+            if (config.LastByRegion != null)
+            {
+                foreach (var snap in config.LastByRegion.Values)
+                {
+                    if (snap == null || string.IsNullOrWhiteSpace(snap.CharacterName))
+                        continue;
+
+                    var rawLabel = $"{snap.CharacterName}@{snap.HomeWorldName}";
+                    var displayLabel = TruncateLabel(rawLabel, maxTextWidth);
+                    var dim = ImGuiHelpers.GetButtonSize(displayLabel);
+                    sharedButtonWidth = Math.Max(sharedButtonWidth, dim.X + 18f * ImGuiHelpers.GlobalScale);
+                }
+            }
+
+            sharedButtonWidth = Math.Min(sharedButtonWidth, maxSharedButtonWidth);
+
+            float contentWidth = Math.Max(
+                titleWidth,
+                regionColumnWidth + spacing + sharedButtonWidth);
+
+            return Math.Clamp(contentWidth + windowPadding, minWindowWidth * ImGuiHelpers.GlobalScale, maxWindowWidth * ImGuiHelpers.GlobalScale);
         }
     }
 }

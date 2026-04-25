@@ -21,7 +21,7 @@ namespace VIWI.Modules.Workshoppa;
 internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig>
 {
     public const string ModuleName = "Workshoppa";
-    public const string ModuleVersion = "1.1.1";
+    public const string ModuleVersion = "1.1.2";
     public override string Name => ModuleName;
     public override string Version => ModuleVersion;
     public WorkshoppaConfig _configuration => ModuleConfig;
@@ -63,13 +63,14 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
     private string _mergeItemName = "";
     private int _mergeAttempts;
     private const int MaxMergeAttempts = 2;
-    private bool _mergePassInFlight;
 
     private int _stallTicks;
     private const int MaxStallTicks = 2000;
     private Stage _lastStage;
     private DateTime _lastProgressAt = DateTime.MinValue;
     private static readonly TimeSpan MaxNoProgress = TimeSpan.FromSeconds(15);
+
+
 
     public override void Initialize(VIWIConfig config)
     {
@@ -79,7 +80,7 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
         _workshopCache = new WorkshopCache(DataManager, PluginLog);
         _gameStrings = new(DataManager, PluginLog);
 
-        _mainWindow = new WorkshoppaWindow(this, ClientState, _configuration, _workshopCache, new IconCache(TextureProvider), ChatGui, new RecipeTree(DataManager, PluginLog), PluginLog);
+        _mainWindow = new WorkshoppaWindow(this, ClientState, _configuration, _workshopCache, new IconCache(TextureProvider), ObjectTable, ChatGui, new RecipeTree(DataManager, PluginLog), PluginLog);
         CorePlugin.WindowSystem.AddWindow(_mainWindow);
         _repairKitWindow = new(PluginLog, GameGui, AddonLifecycle, _configuration, _externalPluginHandler);
         CorePlugin.WindowSystem.AddWindow(_repairKitWindow);
@@ -199,6 +200,8 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
     }
     private void OnFrameworkUpdate(IFramework framework)
     {
+        HandleWorkshopTravel();
+
         if (!ClientState.IsLoggedIn ||
             !WorkshopTerritories.Contains(ClientState.TerritoryType) ||
             Condition[ConditionFlag.BoundByDuty] ||
@@ -262,8 +265,25 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
                     }
                     else
                     {
-                        ChatGui.PrintError("[Workshoppa] Stall detected, Bailing out.");
-                        CurrentStage = Stage.RequestStop;
+                        if (_configuration.Mode == TurnInMode.Leveling)
+                        {
+
+                            if (CurrentStage == Stage.ContributeMaterials || CurrentStage == Stage.SelectCraftBranch)
+                            {
+                                CurrentStage = Stage.CloseDeliveryMenu;
+                            }
+                            else
+                            {
+                                ChatGui.PrintError($"[Workshoppa] Stall detected on stage {CurrentStage} while leveling, Restarting Project.");
+                                ChatGui.PrintError($"[Workshoppa] Please report this message to Vera!");
+                            }
+                        }
+                        else if (_configuration.Mode != TurnInMode.Leveling)
+                        {
+                            ChatGui.PrintError($"[Workshoppa] Stall detected on stage {CurrentStage}, Bailing out.");
+                            ChatGui.PrintError($"[Workshoppa] Please report this message to Vera!");
+                            CurrentStage = Stage.RequestStop;
+                        }
                     }
                     return;
                 }
@@ -337,26 +357,30 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
                     break;
 
                 case Stage.MergeStacks:
-                    if (_mergeRunner.IsRunning)
-                        break;
-                    if (HasItemInSingleSlot(_mergeItemId, _mergeRequired))
+                    if (_mergeRunner != null)
                     {
-                        PluginLog.Information($"[Workshoppa] Merge satisfied for {_mergeRequired}x {_mergeItemName}, resuming.");
-                        ClearMergeState();
-                        CurrentStage = Stage.TargetFabricationStation;
-                        MarkProgress();
-                        break;
-                    }
+                        if (_mergeRunner.IsRunning)
+                            break;
+                        if (HasItemInSingleSlot(_mergeItemId, _mergeRequired))
+                        {
+                            PluginLog.Information($"[Workshoppa] Merge satisfied for {_mergeRequired}x {_mergeItemName}, resuming.");
+                            ClearMergeState();
+                            CurrentStage = Stage.TargetFabricationStation;
+                            MarkProgress();
+                            break;
+                        }
 
-                    if (!_mergeRunner.TryStartMergeForItem(_mergeItemId))
-                    {
-                        PluginLog.Warning($"[Workshoppa] Merge pass could not start for {_mergeItemName} (plan empty or blocked).");
-                        _mergeAttempts++;
+                        if (!_mergeRunner.TryStartMergeForItem(_mergeItemId))
+                        {
+                            PluginLog.Warning($"[Workshoppa] Merge pass could not start for {_mergeItemName} (plan empty or blocked).");
+                            _mergeAttempts++;
+                            break;
+                        }
+                        PluginLog.Information($"[Workshoppa] Merge pass {_mergeAttempts}/{MaxMergeAttempts} started for {_mergeItemName}...");
+                        CurrentStage = Stage.TargetFabricationStation;
+                        _continueAt = DateTime.Now.AddSeconds(5);
                         break;
                     }
-                    PluginLog.Information($"[Workshoppa] Merge pass {_mergeAttempts}/{MaxMergeAttempts} started for {_mergeItemName}...");
-                    CurrentStage = Stage.TargetFabricationStation;
-                    _continueAt = DateTime.Now.AddSeconds(5);
                     break;
 
                 case Stage.OpenRequestItemWindow:
@@ -395,13 +419,13 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
     }
     private bool TryGetCurrentCraft(out WorkshopCraft craft)
     {
-        craft = default;
+        craft = default!;
 
         var id = _configuration.CurrentlyCraftedItem?.WorkshopItemId;
         if (id == null)
             return false;
 
-        craft = _workshopCache.Crafts.FirstOrDefault(x => x.WorkshopItemId == id.Value);
+        craft = _workshopCache.Crafts.FirstOrDefault(x => x.WorkshopItemId == id.Value)!;
         return craft.WorkshopItemId != 0;
     }
     private void ClearMergeState()

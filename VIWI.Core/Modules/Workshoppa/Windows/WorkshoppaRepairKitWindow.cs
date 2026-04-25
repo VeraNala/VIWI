@@ -147,6 +147,10 @@ internal sealed unsafe class WorkshoppaRepairKitWindow : WorkshoppaShopWindowBas
     public void ShopLogic()
     {
         int darkMatterClusters = GetDarkMatterClusterCount();
+        if (Shop.ItemForSale == null)
+        {
+            return;
+        }
         var item = Shop.ItemForSale.Value;
         int missingItems = Math.Max(0, darkMatterClusters * 5 - (int)item.OwnedItems);
         int toPurchase = Math.Min(Shop.GetMaxItemsToPurchase(), missingItems);

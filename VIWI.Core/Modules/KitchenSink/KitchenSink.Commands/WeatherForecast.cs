@@ -1,6 +1,5 @@
 using System;
 using Dalamud.Bindings.ImGui;
-using Dalamud.Game;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Textures.TextureWraps;

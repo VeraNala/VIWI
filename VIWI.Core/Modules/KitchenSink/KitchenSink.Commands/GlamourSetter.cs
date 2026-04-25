@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.Collections.ObjectModel;
-using System.Linq;
-using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
@@ -14,8 +8,15 @@ using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
-using Lumina.Excel.Sheets;
 using FFXIVClientStructs.FFXIV.Client.Game;
+using Lumina.Excel.Sheets;
+using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Numerics;
+using Cabinet = Lumina.Excel.Sheets.Cabinet;
 
 namespace VIWI.Modules.KitchenSink.Commands;
 
@@ -87,6 +88,7 @@ internal sealed class GlamourSetter : Window, IDisposable
     private readonly IDalamudPluginInterface _pi;
     private readonly IDataManager _data;
     private readonly IClientState _clientState;
+    private readonly IPlayerState _playerState;
     private readonly IChatGui _chat;
     private readonly ICommandManager _commands;
     private readonly IAddonLifecycle _addonLifecycle;
@@ -104,6 +106,7 @@ internal sealed class GlamourSetter : Window, IDisposable
         IDalamudPluginInterface pi,
         IDataManager data,
         IClientState clientState,
+        IPlayerState playerState,
         IChatGui chat,
         ICommandManager commands,
         IAddonLifecycle addonLifecycle,
@@ -114,6 +117,7 @@ internal sealed class GlamourSetter : Window, IDisposable
         _pi = pi;
         _data = data;
         _clientState = clientState;
+        _playerState = playerState;
         _chat = chat;
         _commands = commands;
         _addonLifecycle = addonLifecycle;
@@ -192,7 +196,7 @@ internal sealed class GlamourSetter : Window, IDisposable
 
     public override void PreOpenCheck()
     {
-        var cid = _clientState.LocalContentId;
+        var cid = _playerState.ContentId;
         if (!_clientState.IsLoggedIn || cid == 0)
         {
             _character = null;

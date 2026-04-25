@@ -6,6 +6,7 @@ using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
+using ECommons.Configuration;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using System;
 using System.Collections.Generic;
@@ -15,6 +16,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using VIWI.Core;
 using VIWI.Modules.Workshoppa.GameData;
+using static VIWI.Modules.Workshoppa.WorkshoppaConfig;
 
 namespace VIWI.Modules.Workshoppa.Windows;
 
@@ -27,6 +29,7 @@ internal sealed class WorkshoppaWindow : Window
     private readonly WorkshoppaConfig _config;
     private readonly WorkshopCache _workshopCache;
     private readonly IconCache _iconCache;
+    private readonly IObjectTable _objectTable;
     private readonly IChatGui _chatGui;
     private readonly RecipeTree _recipeTree;
     private readonly IPluginLog _pluginLog;
@@ -41,6 +44,7 @@ internal sealed class WorkshoppaWindow : Window
         WorkshoppaConfig config,
         WorkshopCache workshopCache,
         IconCache iconCache,
+        IObjectTable objectTable,
         IChatGui chatGui,
         RecipeTree recipeTree,
         IPluginLog pluginLog)
@@ -51,6 +55,7 @@ internal sealed class WorkshoppaWindow : Window
         _config = config;
         _workshopCache = workshopCache;
         _iconCache = iconCache;
+        _objectTable = objectTable;
         _chatGui = chatGui;
         _recipeTree = recipeTree;
         _pluginLog = pluginLog;
@@ -75,7 +80,7 @@ internal sealed class WorkshoppaWindow : Window
     public ButtonState State { get; set; } = ButtonState.None;
 
     private bool IsDiscipleOfHandOrLand =>
-        _clientState.LocalPlayer != null && _clientState.LocalPlayer.ClassJob.RowId is >= 8 and <= 18;
+        _objectTable.LocalPlayer != null && _objectTable.LocalPlayer.ClassJob.RowId is >= 8 and <= 18;
 
     public override void Draw()
     {
@@ -139,6 +144,7 @@ internal sealed class WorkshoppaWindow : Window
                 {
                     State = ButtonState.Pause;
                     _config.CurrentlyCraftedItem = null;
+                    _config.Mode = TurnInMode.Normal;
                     Save();
                 }
                 ImGui.EndDisabled();
@@ -203,88 +209,94 @@ internal sealed class WorkshoppaWindow : Window
         }
 
         ImGui.Separator();
-        ImGui.Text("Queue:");
-        ImGui.BeginDisabled(_module.CurrentStage != Stage.Stopped);
-
-        WorkshoppaConfig.QueuedItem? itemToRemove = null;
-        for (int i = 0; i < _config.ItemQueue.Count; ++i)
+        if (_module._configuration.Mode == WorkshoppaConfig.TurnInMode.Leveling)
         {
-            using var _ = ImRaii.PushId($"ItemQueue{i}");
-            var item = _config.ItemQueue[i];
-            var craft = _workshopCache.Crafts.Single(x => x.WorkshopItemId == item.WorkshopItemId);
-
-            var icon = _iconCache.GetIcon(craft.IconId);
-            if (icon != null)
-            {
-                ImGui.Image(icon.Handle, new Vector2(ImGui.GetFrameHeight()));
-                ImGui.SameLine(0, ImGui.GetStyle().ItemInnerSpacing.X);
-            }
-
-            ImGui.SetNextItemWidth(Math.Max(100 * ImGui.GetIO().FontGlobalScale,
-                4 * (ImGui.GetFrameHeight() + ImGui.GetStyle().FramePadding.X)));
-
-            int quantity = item.Quantity;
-            if (ImGui.InputInt(craft.Name, ref quantity))
-            {
-                item.Quantity = Math.Max(0, quantity);
-                Save();
-            }
-
-            ImGui.OpenPopupOnItemClick($"###Context{i}");
-            using var popup = ImRaii.ContextPopup($"###Context{i}");
-            if (popup)
-            {
-                if (ImGui.MenuItem($"Remove {craft.Name}"))
-                    itemToRemove = item;
-            }
+            DrawLevelingTimeEstimate();
         }
-
-        if (itemToRemove != null)
+        else
         {
-            _config.ItemQueue.Remove(itemToRemove);
-            Save();
-        }
+            ImGui.Text("Queue:");
+            ImGui.BeginDisabled(_module.CurrentStage != Stage.Stopped);
 
-        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
-        if (ImGui.BeginCombo("##CraftSelection", "Add Craft...", ImGuiComboFlags.HeightLarge))
-        {
-            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
-            ImGui.InputTextWithHint("", "Filter...", ref _searchString, 256);
-
-            foreach (var craft in _workshopCache.Crafts
-                         .Where(x => x.Name.Contains(_searchString, StringComparison.OrdinalIgnoreCase))
-                         .OrderBy(x => x.WorkshopItemId))
+            WorkshoppaConfig.QueuedItem? itemToRemove = null;
+            for (int i = 0; i < _config.ItemQueue.Count; ++i)
             {
-                IDalamudTextureWrap? icon = _iconCache.GetIcon(craft.IconId);
-                Vector2 pos = ImGui.GetCursorPos();
-                Vector2 iconSize = new(ImGui.GetTextLineHeight() + ImGui.GetStyle().ItemSpacing.Y);
+                using var _ = ImRaii.PushId($"ItemQueue{i}");
+                var item = _config.ItemQueue[i];
+                var craft = _workshopCache.Crafts.Single(x => x.WorkshopItemId == item.WorkshopItemId);
 
+                var icon = _iconCache.GetIcon(craft.IconId);
                 if (icon != null)
-                    ImGui.SetCursorPos(pos + new Vector2(iconSize.X + ImGui.GetStyle().FramePadding.X, ImGui.GetStyle().ItemSpacing.Y / 2));
-
-                if (ImGui.Selectable($"{craft.Name}##SelectCraft{craft.WorkshopItemId}", false, ImGuiSelectableFlags.SpanAllColumns))
                 {
-                    _config.ItemQueue.Add(new WorkshoppaConfig.QueuedItem
-                    {
-                        WorkshopItemId = craft.WorkshopItemId,
-                        Quantity = 1,
-                    });
+                    ImGui.Image(icon.Handle, new Vector2(ImGui.GetFrameHeight()));
+                    ImGui.SameLine(0, ImGui.GetStyle().ItemInnerSpacing.X);
+                }
+
+                ImGui.SetNextItemWidth(Math.Max(100 * ImGui.GetIO().FontGlobalScale,
+                    4 * (ImGui.GetFrameHeight() + ImGui.GetStyle().FramePadding.X)));
+
+                int quantity = item.Quantity;
+                if (ImGui.InputInt(craft.Name, ref quantity))
+                {
+                    item.Quantity = Math.Max(0, quantity);
                     Save();
                 }
 
-                if (icon != null)
+                ImGui.OpenPopupOnItemClick($"###Context{i}");
+                using var popup = ImRaii.ContextPopup($"###Context{i}");
+                if (popup)
                 {
-                    ImGui.SameLine(0, 0);
-                    ImGui.SetCursorPos(pos);
-                    ImGui.Image(icon.Handle, iconSize);
+                    if (ImGui.MenuItem($"Remove {craft.Name}"))
+                        itemToRemove = item;
                 }
             }
 
-            ImGui.EndCombo();
+            if (itemToRemove != null)
+            {
+                _config.ItemQueue.Remove(itemToRemove);
+                Save();
+            }
+
+            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+            if (ImGui.BeginCombo("##CraftSelection", "Add Craft...", ImGuiComboFlags.HeightLarge))
+            {
+                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+                ImGui.InputTextWithHint("", "Filter...", ref _searchString, 256);
+
+                foreach (var craft in _workshopCache.Crafts
+                             .Where(x => x.Name.Contains(_searchString, StringComparison.OrdinalIgnoreCase))
+                             .OrderBy(x => x.WorkshopItemId))
+                {
+                    IDalamudTextureWrap? icon = _iconCache.GetIcon(craft.IconId);
+                    Vector2 pos = ImGui.GetCursorPos();
+                    Vector2 iconSize = new(ImGui.GetTextLineHeight() + ImGui.GetStyle().ItemSpacing.Y);
+
+                    if (icon != null)
+                        ImGui.SetCursorPos(pos + new Vector2(iconSize.X + ImGui.GetStyle().FramePadding.X, ImGui.GetStyle().ItemSpacing.Y / 2));
+
+                    if (ImGui.Selectable($"{craft.Name}##SelectCraft{craft.WorkshopItemId}", false, ImGuiSelectableFlags.SpanAllColumns))
+                    {
+                        _config.ItemQueue.Add(new WorkshoppaConfig.QueuedItem
+                        {
+                            WorkshopItemId = craft.WorkshopItemId,
+                            Quantity = 1,
+                        });
+                        Save();
+                    }
+
+                    if (icon != null)
+                    {
+                        ImGui.SameLine(0, 0);
+                        ImGui.SetCursorPos(pos);
+                        ImGui.Image(icon.Handle, iconSize);
+                    }
+                }
+
+                ImGui.EndCombo();
+            }
+
+            ImGui.EndDisabled();
         }
-
-        ImGui.EndDisabled();
-
         ImGui.Separator();
         ImGui.Text($"Debug (Stage): {_module.CurrentStage}");
     }
@@ -591,15 +603,69 @@ internal sealed class WorkshoppaWindow : Window
         if (NearFabricationStation && _module.CurrentStage == Stage.Stopped && IsDiscipleOfHandOrLand)
         {
             _checkInventory = false;
-            _config.CurrentlyCraftedItem = null;
-            _config.ItemQueue.Clear();
-            _config.Mode = WorkshoppaConfig.TurnInMode.Leveling;
+            _module.ResetLevelingRuntimeState();
             State = ButtonState.Start;
         }
         else
         {
             _chatGui.PrintError($"[Workshoppa] Leveling Failed - Are you on a DoH/oL Class and by a usable workshop?");
         }
+    }
+    private unsafe void DrawLevelingTimeEstimate()
+    {
+        const int materialsPerTurnin = 55;
+        const double secondsPerSetOfThreeTurnins = 10.0;
+
+        InventoryManager* inventoryManager = InventoryManager.Instance();
+        if (inventoryManager == null)
+            return;
+
+        int elmLumber = GetInventoryCount(inventoryManager, 5367); // Elm Lumber
+        int mudstone = GetInventoryCount(inventoryManager, 5229);  // Mudstone
+        int spruceLog = GetInventoryCount(inventoryManager, 5395); // Spruce Log
+
+        int elmTurnins = elmLumber / materialsPerTurnin;
+        int mudTurnins = mudstone / materialsPerTurnin;
+        int spruceTurnins = spruceLog / materialsPerTurnin;
+
+        int totalTurnins = elmTurnins + mudTurnins + spruceTurnins;
+
+        double estimatedSeconds = (totalTurnins / 3.0) * secondsPerSetOfThreeTurnins;
+        var eta = TimeSpan.FromSeconds(estimatedSeconds);
+
+        ImGui.Text("Leveling Materials:");
+        ImGui.Indent(20);
+
+        DrawIfAny("Elm Lumber", elmLumber, elmTurnins);
+        DrawIfAny("Mudstone", mudstone, mudTurnins);
+        DrawIfAny("Spruce Log", spruceLog, spruceTurnins);
+
+        ImGui.Spacing();
+        ImGui.TextUnformatted($"Remaining Turn-ins: {totalTurnins:N0}");
+        ImGui.TextUnformatted($"Estimated Time Remaining: {FormatEta(eta)}");
+
+        ImGui.Unindent(20);
+    }
+    void DrawIfAny(string label, int mats, int turnins)
+    {
+        if (mats <= 0 && turnins <= 0) return;
+        ImGui.TextUnformatted($"{label}: {mats:N0} materials / {turnins:N0} turn-ins");
+    }
+    private static unsafe int GetInventoryCount(InventoryManager* inventoryManager, uint itemId)
+    {
+        return inventoryManager->GetInventoryItemCount(itemId, true, false, false)
+             + inventoryManager->GetInventoryItemCount(itemId, false, false, false);
+    }
+
+    private static string FormatEta(TimeSpan eta)
+    {
+        if (eta.TotalHours >= 1)
+            return $"{(int)eta.TotalHours}h {eta.Minutes}m {eta.Seconds}s";
+
+        if (eta.TotalMinutes >= 1)
+            return $"{eta.Minutes}m {eta.Seconds}s";
+
+        return $"{eta.Seconds}s";
     }
 
     public enum ButtonState

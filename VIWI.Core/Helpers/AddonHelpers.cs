@@ -1,5 +1,4 @@
 using Dalamud.Plugin.Services;
-using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using System;
 using System.Linq;

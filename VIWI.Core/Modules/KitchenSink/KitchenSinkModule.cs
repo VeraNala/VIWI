@@ -55,10 +55,12 @@ namespace VIWI.Modules.KitchenSink
                 _autoRetainer,
                 CommandManager,
                 ClientState,
+                ObjectTable,
                 ChatGui,
                 NotificationManager,
                 DtrBar,
                 Condition,
+                PlayerState,
                 PluginLog,
                 Framework);
 
@@ -72,6 +74,7 @@ namespace VIWI.Modules.KitchenSink
                 PluginInterface,
                 DataManager,
                 ClientState,
+                PlayerState,
                 ChatGui,
                 CommandManager,
                 AddonLifecycle,
@@ -98,6 +101,7 @@ namespace VIWI.Modules.KitchenSink
             _leves ??= new Leves(
                 Framework,
                 ClientState,
+                PlayerState,
                 ChatGui,
                 _configuration);
             if (_configuration.WeaponIconsEnabled)

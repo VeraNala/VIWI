@@ -1,6 +1,7 @@
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Plugin.Services;
+using ECommons.Configuration;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
@@ -8,6 +9,7 @@ using Lumina.Excel.Sheets;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using VIWI.Helpers;
 using VIWI.Modules.Workshoppa.GameData;
 using static VIWI.Core.VIWIContext;
@@ -78,16 +80,19 @@ internal sealed partial class WorkshoppaModule
         _contributingItemId = null;
     }
 
-    private void ResetLevelingRuntimeState()
+    public void ResetLevelingRuntimeState()
     {
         ResetLevelingProject();
+        _configuration.Mode = TurnInMode.Leveling;
+        _configuration.CurrentlyCraftedItem = null;
+        _configuration.ItemQueue.Clear();
+        SaveConfig();
 
         foreach (var (itemId, _) in LevelingTargets)
         {
             if (_turnins.TryGetValue(itemId, out var st))
                 st.Exhausted = false;
         }
-
         _stallTicks = 0;
         _lastProgressAt = DateTime.Now;
         PluginLog.Information("[Workshoppa] Leveling runtime state FULL reset.");
@@ -120,7 +125,12 @@ internal sealed partial class WorkshoppaModule
 
     private void SelectCraftBranch()
     {
-        if (_configuration.Mode == TurnInMode.Leveling
+        if (_configuration.Mode == TurnInMode.Leveling && ShouldTerminateLevelingProject() && SelectSelectString("Discontinue", 2, s => s.StartsWith("Discontinue project.", StringComparison.Ordinal)))
+        {
+            CurrentStage = Stage.DiscontinueProject;
+            _continueAt = DateTime.Now.AddSeconds(1);
+        }
+        else if (_configuration.Mode == TurnInMode.Leveling
             && AnyLevelingTargetsEnabled()
             && ShouldDiscontinueLevelingProject()
             && SelectSelectString("Discontinue", 2, s => s.StartsWith("Discontinue project.", StringComparison.Ordinal)))
@@ -162,10 +172,18 @@ internal sealed partial class WorkshoppaModule
             CurrentStage = Stage.ConfirmCollectProduct;
             _continueAt = DateTime.Now.AddSeconds(0.25);
         }
-        else if (_configuration.Mode == TurnInMode.Leveling && SelectSelectString("Nothing", 1, s => s == "Nothing."))
+        else if (_configuration.Mode == TurnInMode.Leveling && SelectSelectString("Nothing", 1, s => s == "Nothing." && !AllLevelingMaterialsExhausted()))
         {
-            PluginLog.Information("No Project Available, Restarting,");
+            PluginLog.Information("No Project Available, Materials not yet Exhausted, Restarting,");
             CurrentStage = Stage.TakeItemFromQueue;
+            _continueAt = DateTime.Now.AddSeconds(0.5);
+        }
+        else if (_configuration.Mode == TurnInMode.Leveling && SelectSelectString("Nothing", 1, s => s == "Nothing." && AllLevelingMaterialsExhausted()))
+        {
+            PluginLog.Information("No Project or Materials Available, Stopping Leveling,");
+            CurrentStage = Stage.RequestStop;
+            _configuration.CurrentlyCraftedItem = null;
+            SaveConfig();
             _continueAt = DateTime.Now.AddSeconds(0.5);
         }
     }
@@ -180,8 +198,8 @@ internal sealed partial class WorkshoppaModule
 
         if (_configuration.Mode == TurnInMode.Leveling && AllLevelingTargetsDisabled())
         {
-            ChatGui.Print("[Workshoppa] All leveling targets are complete/disabled. Stopping.");
-            CurrentStage = Stage.RequestStop;
+            ChatGui.Print("[Workshoppa] All leveling targets are complete/disabled. Closing Windows.");
+            CurrentStage = Stage.CloseDeliveryMenu;
             _continueAt = DateTime.Now.AddSeconds(0.2);
             return;
         }
@@ -232,9 +250,11 @@ internal sealed partial class WorkshoppaModule
         {
             PluginLog.Information("[Workshoppa] No eligible leveling item found in craft list; will proceed via discontinue/restart logic.");
             if (ShouldDiscontinueLevelingProject())
-            CurrentStage = Stage.CloseDeliveryMenu;
-            _continueAt = DateTime.Now.AddSeconds(2);
-            return;
+            {
+                CurrentStage = Stage.CloseDeliveryMenu;
+                _continueAt = DateTime.Now.AddSeconds(2);
+                return;
+            }
         }
 
         var item = craftState.Items[targetIndex];
@@ -254,7 +274,7 @@ internal sealed partial class WorkshoppaModule
 
             if (itemCount < item.ItemCountPerStep)
             {
-                ChatGui.PrintError($"[Workshoppa] Out of {item.ItemName} for this project; will continue with other enabled items.");
+                ChatGui.PrintError($"[Workshoppa] Out of {SafeItemName(item.ItemName)} for this project; will continue with other enabled items.");
                 _turnins[item.ItemId].Exhausted = true;
                 _continueAt = DateTime.Now.AddSeconds(0.2);
                 return;
@@ -264,7 +284,7 @@ internal sealed partial class WorkshoppaModule
 
             if (_mergeAttempts >= MaxMergeAttempts)
             {
-                ChatGui.PrintError($"[Workshoppa] Couldn't auto-merge {item.ItemName} after {_mergeAttempts} attempts. Merge manually to continue.");
+                ChatGui.PrintError($"[Workshoppa] Couldn't auto-merge {SafeItemName(item.ItemName)} after {_mergeAttempts} attempts. Merge manually to continue.");
                 CurrentStage = Stage.RequestStop;
                 return;
             }
@@ -272,7 +292,7 @@ internal sealed partial class WorkshoppaModule
             _mergePending = true;
             _mergeItemId = item.ItemId;
             _mergeRequired = (uint)item.ItemCountPerStep;
-            _mergeItemName = item.ItemName ?? item.ItemId.ToString();
+            _mergeItemName = SafeItemName(item.ItemName);
 
             CurrentStage = Stage.CloseDeliveryMenu;
             return;
@@ -280,7 +300,7 @@ internal sealed partial class WorkshoppaModule
 
         _externalPluginHandler.SaveTextAdvance();
 
-        PluginLog.Information($"Contributing Specific {item.ItemCountPerStep}x {item.ItemName} (itemId={item.ItemId})");
+        PluginLog.Information($"Contributing Specific {item.ItemCountPerStep} x {SafeItemName(item.ItemName)} (itemId={item.ItemId})");
         _contributingItemId = item.ItemId;
 
         var contributeMaterial = stackalloc AtkValue[]
@@ -325,8 +345,7 @@ internal sealed partial class WorkshoppaModule
 
             if (!HasItemInSingleSlot(item.ItemId, item.ItemCountPerStep))
             {
-                PluginLog.Error(
-                    $"Can't contribute item {item.ItemId} to craft, couldn't find {item.ItemCountPerStep}x in a single inventory slot");
+                PluginLog.Error($"Can't contribute item {item.ItemId} to craft, couldn't find {item.ItemCountPerStep}x in a single inventory slot");
 
                 InventoryManager* inventoryManager = InventoryManager.Instance();
                 int itemCount = 0;
@@ -338,8 +357,7 @@ internal sealed partial class WorkshoppaModule
 
                 if (itemCount < item.ItemCountPerStep)
                 {
-                    ChatGui.PrintError(
-                        $"[Workshoppa] You don't have the needed {item.ItemCountPerStep}x {item.ItemName} to continue.");
+                    ChatGui.PrintError($"[Workshoppa] You don't have the needed {item.ItemCountPerStep}x {SafeItemName(item.ItemName)} to continue.");
                     CurrentStage = Stage.RequestStop;
                     break;
                 }
@@ -349,7 +367,7 @@ internal sealed partial class WorkshoppaModule
 
                 if (_mergeAttempts >= MaxMergeAttempts)
                 {
-                    ChatGui.PrintError($"[Workshoppa] Couldn't auto-merge {item.ItemName} after {_mergeAttempts} attempts. Merge manually to continue.");
+                    ChatGui.PrintError($"[Workshoppa] Couldn't auto-merge {SafeItemName(item.ItemName)} after {_mergeAttempts} attempts. Merge manually to continue.");
                     CurrentStage = Stage.RequestStop;
                     break;
                 }
@@ -357,7 +375,7 @@ internal sealed partial class WorkshoppaModule
                 _mergePending = true;
                 _mergeItemId = item.ItemId;
                 _mergeRequired = (uint)item.ItemCountPerStep;
-                _mergeItemName = item.ItemName ?? item.ItemId.ToString();
+                _mergeItemName = SafeItemName(item.ItemName);
                 CurrentStage = Stage.CloseDeliveryMenu;
                 _mergeAttempts++;
 
@@ -366,7 +384,7 @@ internal sealed partial class WorkshoppaModule
 
             _externalPluginHandler.SaveTextAdvance();
 
-            PluginLog.Information($"Contributing {item.ItemCountPerStep}x {item.ItemName}");
+            PluginLog.Information($"Contributing {item.ItemCountPerStep} x {SafeItemName(item.ItemName)}");
             _contributingItemId = item.ItemId;
             var contributeMaterial = stackalloc AtkValue[]
             {
@@ -402,6 +420,9 @@ internal sealed partial class WorkshoppaModule
         }
 
         var item = craftState.Items.SingleOrDefault(x => x.ItemId == _contributingItemId);
+        if (item == null)
+            return;
+
         if (item.ItemId == 0)
         {
             PluginLog.Warning($"Contributing item {_contributingItemId} not found in CraftState.");
@@ -420,8 +441,8 @@ internal sealed partial class WorkshoppaModule
             ClampLevelingTargetsByCurrentLevel(PlayerState);
             if (AllLevelingTargetsDisabled())
             {
-                ChatGui.Print("[Workshoppa] All leveling targets are complete/disabled. Stopping.");
-                CurrentStage = Stage.RequestStop;
+                ChatGui.Print("[Workshoppa] All leveling targets are complete/disabled. Closing Windows.");
+                CurrentStage = Stage.CloseDeliveryMenu;
                 _continueAt = DateTime.Now.AddSeconds(0.2);
                 return;
             }
@@ -491,7 +512,14 @@ internal sealed partial class WorkshoppaModule
     // ------------------------------
     // DISCONTINUE LEVELING
     // ------------------------------
-
+    private bool ShouldTerminateLevelingProject()
+    {
+        if (AllLevelingTargetsDisabled() || AllLevelingMaterialsExhausted())
+        {
+            return true;
+        }
+        return false;
+    }
     private bool ShouldDiscontinueLevelingProject()
     {
         if (!AnyLevelingTargetsEnabled())
@@ -499,15 +527,11 @@ internal sealed partial class WorkshoppaModule
 
         if (AllLevelingTargetsDisabled())
         {
-            ChatGui.Print("[Workshoppa] All leveling targets disabled. Stopping.");
-            CurrentStage = Stage.RequestStop;
             return true;
         }
 
         if (AllLevelingMaterialsExhausted())
         {
-            ChatGui.PrintError("[Workshoppa] Out of materials for all enabled leveling targets. Stopping.");
-            CurrentStage = Stage.RequestStop;
             return true;
         }
 
@@ -598,6 +622,13 @@ internal sealed partial class WorkshoppaModule
         addonRequest->AtkUnitBase.FireCallback(4, closeWindow);
         addonRequest->AtkUnitBase.Close(false);
         _externalPluginHandler.RestoreTextAdvance();
+    }
+    private static string SafeItemName(string? itemName)
+    {
+        if (string.IsNullOrWhiteSpace(itemName))
+            return "item";
+
+        return Regex.Replace(itemName, @"<[^>]+>", string.Empty);
     }
 
     private void EnqueueLevelingProject(uint workshopItemId, int quantity)
