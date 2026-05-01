@@ -3,6 +3,8 @@
 
 A collection of plugins-turned-modules, QoL improvements, and Automation features.
 
+## REPO: https://puni.sh/api/repository/vera
+
 ## Includes
 ### 🔑 AutoLogin:
 VIWI - AutoLogin is an Anti-DDoS module that will store the details of your last-known active character and attempt to automatically reconnect to them in the event of a sudden disconnect.
