@@ -92,13 +92,17 @@ internal sealed unsafe class RegularShopController : IDisposable
             short x = 0, y = 0;
             addon->GetPosition(&x, &y);
 
-            short width = 0, height = 0;
+            ushort width = 0, height = 0;
             addon->GetSize(&width, &height, true);
-            x += width;
+
+            short sx = (short)(x + width);
+            short sy = y;
+            short sw = (short)width;
+            short sh = (short)height;
 
             if (_parent.FollowAddon)
             {
-                _parent.SnapToAddonClamped(x, y, width, height, Vector2.Zero);
+                _parent.SnapToAddonClamped(sx, sy, sw, sh, Vector2.Zero);
             }
 
             _parent.IsOpen = true;

@@ -223,7 +223,7 @@ namespace VIWI.Modules.AutoLogin
                 }, "StartAutoLogin");
             }
         }
-        private void TerritoryChange(ushort obj)
+        private void TerritoryChange(uint obj)
         {
             UpdateConfig();
         }

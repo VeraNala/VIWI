@@ -44,7 +44,7 @@ internal sealed partial class WorkshoppaModule
         {
             case WorkshopTravelState.WaitingForArrival:
                 {
-                    if (WorkshopTerritories.Contains(ClientState.TerritoryType))
+                    if (WorkshopTerritories.Contains((ushort)ClientState.TerritoryType))
                     {
                         PluginLog.Information($"[Workshoppa] Arrived in workshop territory {ClientState.TerritoryType}.");
                         _workshopTravelState = WorkshopTravelState.LockingOn;

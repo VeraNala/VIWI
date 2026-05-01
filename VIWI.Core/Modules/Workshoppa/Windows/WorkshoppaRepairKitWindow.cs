@@ -9,7 +9,6 @@ using System;
 using VIWI.Modules.Workshoppa.External;
 using VIWI.Modules.Workshoppa.Windows.Shop;
 using VIWI.Helpers;
-using ValueType = FFXIVClientStructs.FFXIV.Component.GUI.ValueType;
 
 namespace VIWI.Modules.Workshoppa.Windows;
 
@@ -169,9 +168,9 @@ internal sealed unsafe class WorkshoppaRepairKitWindow : WorkshoppaShopWindowBas
 
         var buyItem = stackalloc AtkValue[]
         {
-            new() { Type = ValueType.Int, Int = 0 },
-            new() { Type = ValueType.Int, Int = item.Value.Position },
-            new() { Type = ValueType.Int, Int = buyNow },
+            new() { Type = AtkValueType.Int, Int = 0 },
+            new() { Type = AtkValueType.Int, Int = item.Value.Position },
+            new() { Type = AtkValueType.Int, Int = buyNow },
             new() { Type = 0, Int = 0 }
         };
 

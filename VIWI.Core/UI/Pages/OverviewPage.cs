@@ -2,6 +2,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Lumina.Excel.Sheets;
+using System;
 using System.Linq;
 using System.Numerics;
 using VIWI.Core;
@@ -71,7 +72,9 @@ namespace VIWI.UI.Pages
                         $"Target: {target.Name}, BaseID: {target.BaseId}, ObjID: {target.GameObjectId}");
 
                     Vector3 pos = localPlayer.Position;
+                    float rot = localPlayer.Rotation;
                     Vector3 tpos = target.Position;
+                    float trot = target.Rotation;
                     var distanceToTarget = Vector3.Distance(pos, tpos);
                     var adjustedDistance = distanceToTarget - target.HitboxRadius - localPlayer.HitboxRadius;
                     if (adjustedDistance < 0)
@@ -80,11 +83,13 @@ namespace VIWI.UI.Pages
                     }
 
                     ImGui.BulletText($"DistanceToTarget: {adjustedDistance:0.000}");
+                    ImGui.BulletText($"Player rot={rot * 180f / MathF.PI}, Target rot={trot * 180f / MathF.PI}");
                 }
                 else
                 {
                     ImGui.BulletText("Target: None");
                     ImGui.BulletText("DistanceToTarget: 0");
+                    ImGui.BulletText($"Player rot={localPlayer.Rotation * 180f / MathF.PI}");
                 }
             }
             else

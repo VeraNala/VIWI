@@ -72,7 +72,7 @@ internal sealed class WeatherForecast : Window, IDisposable
         if (wm == null)
             return false;
 
-        if (wm->HasIndividualWeather(_clientState.TerritoryType))
+        if (wm->HasIndividualWeather((ushort)_clientState.TerritoryType))
             return false;
 
         return true;
@@ -84,7 +84,7 @@ internal sealed class WeatherForecast : Window, IDisposable
         if (wm == null)
             return;
 
-        ushort territoryType = _clientState.TerritoryType;
+        var territoryType = (ushort)_clientState.TerritoryType;
 
         for (int i = 0; i < _count; i++)
         {

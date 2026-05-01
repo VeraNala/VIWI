@@ -54,7 +54,7 @@ internal sealed class BunnyBlessed : IDisposable
 		UpdateMapMarkers();
 	}
 
-	private void OnTerritoryChanged(ushort territory)
+	private void OnTerritoryChanged(uint territory)
 	{
 		if (_enabled && territory == 1252)
 		{

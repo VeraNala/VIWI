@@ -203,7 +203,7 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
         HandleWorkshopTravel();
 
         if (!ClientState.IsLoggedIn ||
-            !WorkshopTerritories.Contains(ClientState.TerritoryType) ||
+            !WorkshopTerritories.Contains((ushort)ClientState.TerritoryType) ||
             Condition[ConditionFlag.BoundByDuty] ||
             Condition[ConditionFlag.BetweenAreas] ||
             Condition[ConditionFlag.BetweenAreas51] ||

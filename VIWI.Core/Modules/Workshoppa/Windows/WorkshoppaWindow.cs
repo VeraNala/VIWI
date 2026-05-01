@@ -590,7 +590,7 @@ internal sealed class WorkshoppaWindow : Window
 
     private void ShowErrorConditions()
     {
-        if (!_module.WorkshopTerritories.Contains(VIWIContext.ClientState.TerritoryType))
+        if (!_module.WorkshopTerritories.Contains((ushort)VIWIContext.ClientState.TerritoryType))
             ImGui.TextColored(ImGuiColors.DalamudRed, "You are not in the Company Workshop.");
         else if (!NearFabricationStation)
             ImGui.TextColored(ImGuiColors.DalamudRed, "You are not near a Fabrication Station.");

@@ -8,7 +8,6 @@ using System.Linq;
 using VIWI.Helpers;
 using VIWI.Modules.Workshoppa.External;
 using VIWI.Modules.Workshoppa.Windows.Shop; // ShopItemForSale
-using ValueType = FFXIVClientStructs.FFXIV.Component.GUI.ValueType;
 
 namespace VIWI.Modules.Workshoppa.Windows;
 
@@ -167,9 +166,9 @@ internal sealed unsafe class WorkshoppaCeruleumTankWindow : WorkshoppaShopWindow
 
         var buyItem = stackalloc AtkValue[]
         {
-            new() { Type = ValueType.Int,  Int  = 0 },
-            new() { Type = ValueType.UInt, UInt = (uint)item.Value.Position },
-            new() { Type = ValueType.UInt, UInt = (uint)buyNow },
+            new() { Type = AtkValueType.Int,  Int  = 0 },
+            new() { Type = AtkValueType.UInt, UInt = (uint)item.Value.Position },
+            new() { Type = AtkValueType.UInt, UInt = (uint)buyNow },
         };
 
         addonShop->FireCallback(3, buyItem);
