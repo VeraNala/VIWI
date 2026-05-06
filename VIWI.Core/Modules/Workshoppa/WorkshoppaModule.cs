@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using VIWI.Core;
+using VIWI.IPC;
 using VIWI.Modules.Workshoppa.External;
 using VIWI.Modules.Workshoppa.GameData;
 using VIWI.Modules.Workshoppa.Windows;
@@ -43,6 +44,7 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
     internal readonly IReadOnlyList<ushort> WorkshopTerritories =
         new ushort[] { 423, 424, 425, 653, 984 }.AsReadOnly();
 
+    private WorkshoppaIPC? _ipc;
     private ExternalPluginHandler _externalPluginHandler = null!;
     private WorkshopCache _workshopCache = null!;
     private GameStrings _gameStrings = null!;
@@ -114,10 +116,16 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
         AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "Request", RequestPostSetup);
         AddonLifecycle.RegisterListener(AddonEvent.PostRefresh, "Request", RequestPostRefresh);
         AddonLifecycle.RegisterListener(AddonEvent.PostUpdate, "ContextIconMenu", ContextIconMenuPostReceiveEvent);
+
+        _ipc ??= new WorkshoppaIPC();
+        _ipc.Register();
     }
 
     public override void Disable()
     {
+        try { _ipc?.Dispose(); } catch { }
+        _ipc = null;
+
         _repairKitWindow?.DisableShopListeners();
         _ceruleumTankWindow?.DisableShopListeners();
         _grindstoneShopWindow?.DisableShopListeners();
@@ -488,6 +496,36 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
     {
         if (!_configuration.Enabled) return;
         ProcessCommand("/ws", "");
+    }
+
+    internal bool IpcAddQueueItem(uint workshopItemId, int quantity)
+    {
+        if (!_configuration.Enabled) return false;
+        if (workshopItemId == 0 || quantity <= 0) return false;
+
+        var craft = _workshopCache?.Crafts?.FirstOrDefault(x => x.WorkshopItemId == workshopItemId);
+        if (craft == null || craft.WorkshopItemId == 0) return false;
+
+        var existing = _configuration.ItemQueue.FirstOrDefault(x => x.WorkshopItemId == workshopItemId);
+        if (existing != null)
+            existing.Quantity += quantity;
+        else
+            _configuration.ItemQueue.Add(new WorkshoppaConfig.QueuedItem
+            {
+                WorkshopItemId = workshopItemId,
+                Quantity = quantity,
+            });
+
+        SaveConfig();
+        return true;
+    }
+
+    internal bool IpcClearQueue()
+    {
+        if (!_configuration.Enabled) return false;
+        _configuration.ItemQueue.Clear();
+        SaveConfig();
+        return true;
     }
 
     /*public void OpenRepairKit()
