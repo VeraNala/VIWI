@@ -102,7 +102,7 @@ internal sealed partial class WorkshoppaModule
         }
 
         CurrentStage = Stage.SelectCraft;
-        _continueAt = DateTime.Now.AddSeconds(0.1);
+        _continueAt = DateTime.Now.AddSeconds(0.2);
     }
 
     private unsafe void SelectCraft()
@@ -161,7 +161,7 @@ internal sealed partial class WorkshoppaModule
             return;
         }
         CurrentStage = Stage.ConfirmCraft;
-        _continueAt = DateTime.Now.AddSeconds(0.1);
+        _continueAt = DateTime.Now.AddSeconds(0.2);
     }
 
     private void ConfirmCraft()

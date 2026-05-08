@@ -13,6 +13,7 @@ public sealed class VIWIPlugin : IDalamudPlugin
     public static VIWIPlugin Instance { get; private set; } = null!;
     [PluginService] internal static IPluginLog PluginLog { get; private set; } = null!;
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
+    [PluginService] internal static ITargetManager TargetManager { get; private set; } = null!;
     [PluginService] internal static IClientState ClientState { get; private set; } = null!;
     [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
@@ -37,6 +38,7 @@ public sealed class VIWIPlugin : IDalamudPlugin
             IDalamudPluginInterface pluginInterface,
             IPluginLog pluginLog,
             IClientState clientState,
+            ITargetManager targetManager,
             IPlayerState playerState,
             IObjectTable objectTable,
             IDataManager dataManager,
@@ -67,6 +69,7 @@ public sealed class VIWIPlugin : IDalamudPlugin
         VIWIContext.CoreConfig = config;
         VIWIContext.PluginInterface = pluginInterface;
         VIWIContext.PluginLog = pluginLog;
+        VIWIContext.TargetManager = targetManager;
         VIWIContext.ClientState = clientState;
         VIWIContext.PlayerState = playerState;
         VIWIContext.ObjectTable = objectTable;

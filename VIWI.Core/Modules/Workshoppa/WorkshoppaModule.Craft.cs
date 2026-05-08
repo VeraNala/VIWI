@@ -127,7 +127,7 @@ internal sealed partial class WorkshoppaModule
         if (_configuration.Mode == TurnInMode.Leveling && ShouldTerminateLevelingProject() && SelectSelectString("Discontinue", 2, s => s.StartsWith("Discontinue project.", StringComparison.Ordinal)))
         {
             CurrentStage = Stage.DiscontinueProject;
-            _continueAt = DateTime.Now.AddSeconds(1);
+            _continueAt = DateTime.Now.AddSeconds(0.25);
         }
         else if (_configuration.Mode == TurnInMode.Leveling
             && AnyLevelingTargetsEnabled()
@@ -135,18 +135,18 @@ internal sealed partial class WorkshoppaModule
             && SelectSelectString("Discontinue", 2, s => s.StartsWith("Discontinue project.", StringComparison.Ordinal)))
         {
             CurrentStage = Stage.DiscontinueProject;
-            _continueAt = DateTime.Now.AddSeconds(1);
+            _continueAt = DateTime.Now.AddSeconds(0.25);
         }
         else if (_mergePending && SelectSelectString("Nothing", 3, s => s == "Nothing."))
         {
             PluginLog.Information("Merge Requested, Exiting menu.");
             CurrentStage = Stage.MergeStacks;
-            _continueAt = DateTime.Now.AddSeconds(0.5);
+            _continueAt = DateTime.Now.AddSeconds(0.25);
         }
         else if (SelectSelectString("contrib", 0, s => s.StartsWith("Contribute materials.", StringComparison.Ordinal)))
         {
             CurrentStage = Stage.ContributeMaterials;
-            _continueAt = DateTime.Now.AddSeconds(1);
+            _continueAt = DateTime.Now.AddSeconds(0.5);
         }
         else if (SelectSelectString("advance", 0, s => s.StartsWith("Advance to the next phase of production.", StringComparison.Ordinal)))
         {
@@ -157,13 +157,13 @@ internal sealed partial class WorkshoppaModule
             SaveConfig();
 
             CurrentStage = Stage.TargetFabricationStation;
-            _continueAt = DateTime.Now.AddSeconds(3);
+            _continueAt = DateTime.Now.AddSeconds(1.5);
         }
         else if (SelectSelectString("complete", 0, s => s.StartsWith("Complete the construction of", StringComparison.Ordinal)))
         {
             PluginLog.Information("Item is almost complete, confirming last cutscene");
             CurrentStage = Stage.TargetFabricationStation;
-            _continueAt = DateTime.Now.AddSeconds(3);
+            _continueAt = DateTime.Now.AddSeconds(1.5);
         }
         else if (SelectSelectString("collect", 0, s => s == "Collect finished product."))
         {
@@ -175,7 +175,7 @@ internal sealed partial class WorkshoppaModule
         {
             PluginLog.Information("No Project Available, Materials not yet Exhausted, Restarting,");
             CurrentStage = Stage.TakeItemFromQueue;
-            _continueAt = DateTime.Now.AddSeconds(0.5);
+            _continueAt = DateTime.Now.AddSeconds(0.2);
         }
         else if (_configuration.Mode == TurnInMode.Leveling && SelectSelectString("Nothing", 1, s => s == "Nothing." && AllLevelingMaterialsExhausted()))
         {
@@ -183,7 +183,7 @@ internal sealed partial class WorkshoppaModule
             CurrentStage = Stage.RequestStop;
             _configuration.CurrentlyCraftedItem = null;
             SaveConfig();
-            _continueAt = DateTime.Now.AddSeconds(0.5);
+            _continueAt = DateTime.Now.AddSeconds(0.25);
         }
     }
     #region Leveling - Contribution
@@ -199,7 +199,7 @@ internal sealed partial class WorkshoppaModule
         {
             ChatGui.Print("[Workshoppa] All leveling targets are complete/disabled. Closing Windows.");
             CurrentStage = Stage.CloseDeliveryMenu;
-            _continueAt = DateTime.Now.AddSeconds(0.2);
+            _continueAt = DateTime.Now.AddSeconds(1.5);
             return;
         }
 
@@ -211,7 +211,7 @@ internal sealed partial class WorkshoppaModule
         if (craftState == null || craftState.ResultItem == 0)
         {
             PluginLog.Warning("Could not parse craft state");
-            _continueAt = DateTime.Now.AddSeconds(1);
+            _continueAt = DateTime.Now.AddSeconds(0.5);
             return;
         }
 
@@ -247,11 +247,11 @@ internal sealed partial class WorkshoppaModule
 
         if (targetIndex == -1)
         {
-            PluginLog.Information("[Workshoppa] No eligible leveling item found in craft list; will proceed via discontinue/restart logic.");
+            PluginLog.Information("[Workshoppa] No further eligible leveling items found in craft list; will proceed via discontinue/restart logic.");
             if (ShouldDiscontinueLevelingProject())
             {
                 CurrentStage = Stage.CloseDeliveryMenu;
-                _continueAt = DateTime.Now.AddSeconds(2);
+                _continueAt = DateTime.Now.AddSeconds(0.5);
                 return;
             }
         }
@@ -311,7 +311,7 @@ internal sealed partial class WorkshoppaModule
         };
 
         addonMaterialDelivery->FireCallback(4, contributeMaterial);
-        _fallbackAt = DateTime.Now.AddSeconds(0.2);
+        _fallbackAt = DateTime.Now.AddSeconds(0.4);
         CurrentStage = Stage.OpenRequestItemWindow;
     }
     #endregion
@@ -326,7 +326,7 @@ internal sealed partial class WorkshoppaModule
         if (craftState == null || craftState.ResultItem == 0)
         {
             PluginLog.Warning("Could not parse craft state");
-            _continueAt = DateTime.Now.AddSeconds(1);
+            _continueAt = DateTime.Now.AddSeconds(0.5);
             return;
         }
 
@@ -414,22 +414,31 @@ internal sealed partial class WorkshoppaModule
         if (craftState == null || craftState.ResultItem == 0)
         {
             PluginLog.Warning("Could not parse craft state");
-            _continueAt = DateTime.Now.AddSeconds(1);
+            _continueAt = DateTime.Now.AddSeconds(0.2);
             return;
         }
 
         var item = craftState.Items.SingleOrDefault(x => x.ItemId == _contributingItemId);
         if (item == null)
             return;
-
-        if (item.ItemId == 0)
+        
+        item.StepsComplete++;
+        if (craftState.IsPhaseComplete())
         {
-            PluginLog.Warning($"Contributing item {_contributingItemId} not found in CraftState.");
-            CurrentStage = Stage.RequestStop;
+            if (_configuration.Mode != TurnInMode.Leveling && _contributingItemId != null)
+            {
+                var id = _contributingItemId.Value;
+
+                if (_turnins.TryGetValue(id, out var st) && st.Remaining > 0)
+                {
+                    st.Remaining--;
+                    PluginLog.Information($"Turn-in landed: itemId={id}. Remaining this project={st.Remaining}/{MaxTurninsPerProject}");
+                }
+            }
+            CurrentStage = Stage.TargetFabricationStation;
+            _continueAt = DateTime.Now.AddSeconds(0.5);
             return;
         }
-
-        item.StepsComplete++;
 
         _configuration.CurrentlyCraftedItem!.ContributedItemsInCurrentPhase
             .Single(x => x.ItemId == item.ItemId)
@@ -438,6 +447,7 @@ internal sealed partial class WorkshoppaModule
         if (_configuration.Mode == TurnInMode.Leveling && _contributingItemId != null)
         {
             ClampLevelingTargetsByCurrentLevel(PlayerState);
+
             if (AllLevelingTargetsDisabled())
             {
                 ChatGui.Print("[Workshoppa] All leveling targets are complete/disabled. Closing Windows.");
@@ -447,6 +457,7 @@ internal sealed partial class WorkshoppaModule
             }
 
             var id = _contributingItemId.Value;
+
             if (_turnins.TryGetValue(id, out var st) && st.Remaining > 0)
             {
                 st.Remaining--;
@@ -456,23 +467,17 @@ internal sealed partial class WorkshoppaModule
             if (ShouldDiscontinueLevelingProject())
             {
                 SaveConfig();
+                _contributingItemId = null;
                 CurrentStage = Stage.CloseDeliveryMenu;
-                _continueAt = DateTime.Now.AddSeconds(2);
+                _continueAt = DateTime.Now.AddSeconds(0.2);
                 return;
             }
         }
 
-        if (craftState.IsPhaseComplete())
-        {
-            SaveConfig();
-            CurrentStage = Stage.TargetFabricationStation;
-            _continueAt = DateTime.Now.AddSeconds(0.5);
-            return;
-        }
-
         SaveConfig();
+        _contributingItemId = null;
         CurrentStage = Stage.ContributeMaterials;
-        _continueAt = DateTime.Now.AddSeconds(2);
+        _continueAt = DateTime.Now.AddSeconds(0.8);
     }
     private unsafe bool CheckContinueWithDelivery()
     {
@@ -487,7 +492,7 @@ internal sealed partial class WorkshoppaModule
             if (craftState == null || craftState.ResultItem == 0)
             {
                 PluginLog.Error("Unable to read craft state");
-                _continueAt = DateTime.Now.AddSeconds(1);
+                _continueAt = DateTime.Now.AddSeconds(0.5);
                 return false;
             }
 
@@ -495,7 +500,7 @@ internal sealed partial class WorkshoppaModule
             if (craft == null || craft.WorkshopItemId != _configuration.CurrentlyCraftedItem.WorkshopItemId)
             {
                 PluginLog.Error("Unable to match currently crafted item with game state");
-                _continueAt = DateTime.Now.AddSeconds(1);
+                _continueAt = DateTime.Now.AddSeconds(0.5);
                 return false;
             }
 
@@ -556,7 +561,7 @@ internal sealed partial class WorkshoppaModule
             PluginLog.Debug("Closing MaterialDelivery addon");
             addonMaterialDelivery->FireCallbackInt(-1);
             CurrentStage = Stage.TargetFabricationStation;
-            _continueAt = DateTime.Now.AddSeconds(1);
+            _continueAt = DateTime.Now.AddSeconds(0.5);
         }
     }
     #endregion

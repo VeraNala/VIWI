@@ -3,10 +3,11 @@ using VIWI.Core;
 using VIWI.IPC;
 using VIWI.Modules.KitchenSink.Commands;
 using static VIWI.Core.VIWIContext;
+using KitchenWeatherForecast = VIWI.Modules.KitchenSink.Commands.WeatherForecast;
 
 namespace VIWI.Modules.KitchenSink
 {
-    public sealed class KitchenSinkModule : VIWIModuleBase<KitchenSinkConfig>
+    public sealed unsafe class KitchenSinkModule : VIWIModuleBase<KitchenSinkConfig>
     {
         public const string ModuleName = "KitchenSink";
         public const string ModuleVersion = "1.1.0";
@@ -30,7 +31,7 @@ namespace VIWI.Modules.KitchenSink
         private DropboxQueue? _dropboxQueue;
         private GlamourSetter? _glamourSetter;
         private WeaponIcons? _weaponIcons;
-        private WeatherForecast? _weatherForecast;
+        private KitchenWeatherForecast? _weatherForecast;
         private BunnyBlessed? _bunnyBlessed;
         private Leves? _leves;
         public AutoRetainerIPC? GetAutoRetainer() => _autoRetainer;
@@ -60,7 +61,7 @@ namespace VIWI.Modules.KitchenSink
                 NotificationManager,
                 DtrBar,
                 Condition,
-                PlayerState,
+                VIWIContext.PlayerState,
                 PluginLog,
                 Framework);
 
@@ -74,7 +75,7 @@ namespace VIWI.Modules.KitchenSink
                 PluginInterface,
                 DataManager,
                 ClientState,
-                PlayerState,
+                VIWIContext.PlayerState,
                 ChatGui,
                 CommandManager,
                 AddonLifecycle,
@@ -83,7 +84,7 @@ namespace VIWI.Modules.KitchenSink
 
             _weaponIcons ??= new WeaponIcons(GameGui, KeyState, DataManager, TextureProvider, PluginLog, _configuration);
 
-            _weatherForecast ??= new WeatherForecast(
+            _weatherForecast ??= new KitchenWeatherForecast(
                 ClientState,
                 DataManager,
                 CommandManager,
@@ -101,7 +102,7 @@ namespace VIWI.Modules.KitchenSink
             _leves ??= new Leves(
                 Framework,
                 ClientState,
-                PlayerState,
+                VIWIContext.PlayerState,
                 ChatGui,
                 _configuration);
             if (_configuration.WeaponIconsEnabled)
@@ -120,6 +121,7 @@ namespace VIWI.Modules.KitchenSink
         }
         public override void Disable()
         {
+
             PluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
 
             if (_glamourSetter != null)

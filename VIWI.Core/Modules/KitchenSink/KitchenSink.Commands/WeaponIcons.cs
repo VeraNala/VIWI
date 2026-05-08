@@ -80,6 +80,7 @@ public sealed unsafe class WeaponIcons : IDisposable
             ["SGE"] = BaseColors.Combat + 19,
             ["VPR"] = BaseColors.Combat + 20,
             ["PCT"] = BaseColors.Combat + 21,
+            ["BST"] = BaseColors.Combat + 22,
         };
 
     private readonly IGameGui _gameGui;
@@ -460,7 +461,8 @@ public sealed unsafe class WeaponIcons : IDisposable
         abbr.Equals("RPR", StringComparison.OrdinalIgnoreCase) ||
         abbr.Equals("VPR", StringComparison.OrdinalIgnoreCase) ||
         abbr.Equals("PGL", StringComparison.OrdinalIgnoreCase) ||
-        abbr.Equals("LNC", StringComparison.OrdinalIgnoreCase);
+        abbr.Equals("LNC", StringComparison.OrdinalIgnoreCase) ||
+        abbr.Equals("BST", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsPhysicalRanged(string abbr) =>
         abbr.Equals("BRD", StringComparison.OrdinalIgnoreCase) ||

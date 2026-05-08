@@ -236,7 +236,10 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
                 {
                     _externalPluginHandler.Restore();
                     CurrentStage = Stage.Stopped;
-                    ResetLevelingRuntimeState();
+                    if (_configuration.Mode == TurnInMode.Leveling)
+                    {
+                        ResetLevelingRuntimeState();
+                    }
                     _configuration.Mode = TurnInMode.Normal;
                     SaveConfig();
                 }
@@ -339,8 +342,10 @@ internal sealed partial class WorkshoppaModule : VIWIModuleBase<WorkshoppaConfig
                 case Stage.RequestStop:
                     _externalPluginHandler.Restore();
                     _externalPluginHandler.RestoreTextAdvance();
-                    ResetLevelingRuntimeState();
-                    _configuration.Mode = TurnInMode.Normal;
+                    if (_configuration.Mode == TurnInMode.Normal)
+                    {
+                        ResetLevelingRuntimeState(); 
+                    }
                     CurrentStage = Stage.Stopped;
                     break;
 
