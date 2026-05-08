@@ -550,11 +550,18 @@ internal sealed partial class WorkshoppaModule
     }
     private unsafe void CloseMaterialDelivery()
     {
-        if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "SubmarinePartsMenu", out var addonMaterialDelivery) &&
-            AddonState.IsAddonReady(addonMaterialDelivery))
+        if (AddonHelpers.TryGetAddonByName<AtkUnitBase>(GameGui, "SubmarinePartsMenu", out var addonMaterialDelivery))
         {
             PluginLog.Debug("Closing MaterialDelivery addon");
-            addonMaterialDelivery->FireCallbackInt(-1);
+            var values = stackalloc AtkValue[]
+            {
+                new()
+                {
+                    Type = AtkValueType.Int,
+                    Int = -1,
+                }
+            };
+            addonMaterialDelivery->FireCallback(1, values, true);
             CurrentStage = Stage.TargetFabricationStation;
             _continueAt = DateTime.Now.AddSeconds(1);
         }
