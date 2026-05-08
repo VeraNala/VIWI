@@ -559,7 +559,15 @@ internal sealed partial class WorkshoppaModule
             AddonState.IsAddonReady(addonMaterialDelivery))
         {
             PluginLog.Debug("Closing MaterialDelivery addon");
-            addonMaterialDelivery->FireCallbackInt(-1);
+            var values = stackalloc AtkValue[]
+            {
+                new()
+                {
+                    Type = AtkValueType.Int,
+                    Int = -1,
+                }
+            };
+            addonMaterialDelivery->FireCallback(1, values, true);
             CurrentStage = Stage.TargetFabricationStation;
             _continueAt = DateTime.Now.AddSeconds(0.5);
         }
