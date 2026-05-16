@@ -4,6 +4,7 @@ using Dalamud.Plugin.Services;
 using System;
 using VIWI.Modules.AoEasy;
 using VIWI.Modules.AutoLogin;
+using VIWI.Modules.AutoServiceSelect;
 using VIWI.Modules.KitchenSink;
 using VIWI.Modules.SideCheck;
 
@@ -23,6 +24,7 @@ namespace VIWI.Core
 
         public AoEasyConfig AoEasy { get; set; } = new();
         public AutoLoginConfig AutoLogin { get; set; } = new();
+        public AutoServiceSelectConfig AutoServiceSelect { get; set; } = new();
         public KitchenSinkConfig KitchenSink { get; set; } = new();
         public SideCheckConfig SideCheck { get; set; } = new();
         //public ViwiwiConfig Viwiwi { get; set; } = new();
