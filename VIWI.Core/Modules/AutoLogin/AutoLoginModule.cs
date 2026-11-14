@@ -30,7 +30,7 @@ namespace VIWI.Modules.AutoLogin
     internal unsafe class AutoLoginModule : VIWIModuleBase<AutoLoginConfig>
     {
         public const string ModuleName = "AutoLogin";
-        public const string ModuleVersion = "1.3.1";
+        public const string ModuleVersion = "1.4.0";
         public override string Name => ModuleName;
         public override string Version => ModuleVersion;
         public AutoLoginConfig _configuration => ModuleConfig;
@@ -242,20 +242,20 @@ namespace VIWI.Modules.AutoLogin
             var worldSheet = DataManager.GetExcelSheet<World>();
 
             var homeRow = worldSheet?.GetRow(player.HomeWorld.RowId);
-            if (homeRow != null)
+            if (homeRow != null && TryGetWorldDC(homeRow.Value, out var homeDCID, out var homeDCName))
             {
-                snap.DataCenterID = (int)homeRow.Value.DataCenter.RowId;
-                snap.DataCenterName = homeRow.Value.DataCenter.Value.Name.ExtractText();
+                snap.DataCenterID = homeDCID;
+                snap.DataCenterName = homeDCName;
             }
 
             snap.CurrentWorldName = player.CurrentWorld.Value.Name.ExtractText();
             snap.Visiting = !string.Equals(snap.CurrentWorldName, snap.HomeWorldName, StringComparison.Ordinal);
 
             var currentRow = worldSheet?.GetRow(player.CurrentWorld.RowId);
-            if (currentRow != null)
+            if (currentRow != null && TryGetWorldDC(currentRow.Value, out var currentDCID, out var currentDCName))
             {
-                snap.vDataCenterID = (int)currentRow.Value.DataCenter.RowId;
-                snap.vDataCenterName = currentRow.Value.DataCenter.Value.Name.ExtractText();
+                snap.vDataCenterID = currentDCID;
+                snap.vDataCenterName = currentDCName;
             }
 
             string activeDcName = snap.Visiting && !string.IsNullOrWhiteSpace(snap.vDataCenterName) ? snap.vDataCenterName : snap.DataCenterName;
@@ -330,6 +330,20 @@ namespace VIWI.Modules.AutoLogin
             {
                 RunLoginCommands();
             }
+        }
+        
+        private static bool TryGetWorldDC(World world, out int dcID, out string dcName) {
+            dcID = 0;
+            dcName = string.Empty;
+
+            var dcSheet = DataManager.GetExcelSheet<WorldDCGroupType>();
+            if (dcSheet == null || !dcSheet.TryGetRow(world.Unknown0, out var dc) || dc.RowId == 0) {
+                return false;
+            }
+
+            dcID = (int) dc.RowId;
+            dcName = dc.Name.ExtractText();
+            return true;
         }
 
         #region LoginLoop
@@ -496,7 +510,7 @@ namespace VIWI.Modules.AutoLogin
 
                 if (visitingWorldRow != null)
                 {
-                    var visitingDc = (int)visitingWorldRow.Value.DataCenter.RowId;
+                    var visitingDc = TryGetWorldDC(visitingWorldRow.Value, out var vDc, out _) ? vDc : 0;
 
                     if (visitingDc != 0 && visitingDc != dc)
                     {
@@ -668,7 +682,7 @@ namespace VIWI.Modules.AutoLogin
             var worldSheet = DataManager.GetExcelSheet<World>();
             var currWorldRow = worldSheet?.FirstOrDefault(row => row.Name.ExtractText().Equals(currWorld, StringComparison.Ordinal));
 
-            int currDc = currWorldRow != null ? (int)currWorldRow.Value.DataCenter.RowId : dc;
+            int currDc = currWorldRow != null && TryGetWorldDC(currWorldRow.Value, out var cDc, out _) ? cDc : dc;
             bool sameDc = currDc == dc;
             string targetWorld = sameDc ? homeWorld : currWorld;
 
