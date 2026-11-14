@@ -79,9 +79,9 @@ internal sealed class DropboxQueue : IDisposable
                 return false;
             }
 
-            dropboxPlugin = plugin;
+            dropboxPlugin = plugin as IDalamudPlugin;
 
-            var type = dropboxPlugin.GetType().Assembly.GetType("Dropbox.ItemQueueUI");
+            var type = dropboxPlugin?.GetType().Assembly.GetType("Dropbox.ItemQueueUI");
             itemQuantities = (IDictionary?)type?
                 .GetField("ItemQuantities", BindingFlags.Static | BindingFlags.Public)?
                 .GetValue(null);
